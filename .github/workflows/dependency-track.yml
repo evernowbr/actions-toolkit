@@ -10,9 +10,9 @@ on:
     inputs:
       name:
         # Friendly description to be shown in the UI instead of 'name'
-        description: 'Person to greet'
+        description: 'Nome da aplicação'
         # Default value if no value is explicitly provided
-        default: 'World'
+        default: 'Aplicação'
         # Input has to be provided for the workflow to run
         required: true
         # The data type of the input
@@ -21,12 +21,80 @@ on:
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
   # This workflow contains a single job called "greet"
-  greet:
+  dependency-track-scan:
     # The type of runner that the job will run on
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
 
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
     # Runs a single command using the runners shell
-    - name: Send greeting
-      run: echo "Hello ${{ inputs.name }}"
+    - name: Checkout do repositório
+      uses: actions/checkout@v3
+
+    - name: Gerar SBOM com Syft
+      run: |
+          echo "🔧 Gerando SBOM da aplicação..." 
+          syft dir:"${{ github.workspace }}" --verbose -o cyclonedx-json=raw_cyclonedx_report.json
+
+          if [ $? -ne 0 ]; then
+            echo "❌ Erro ao gerar o SBOM com Syft"
+            exit 1
+          fi
+
+          echo "🧹 Normalizando SBOM..."
+          jq 'if .components then .components |= unique_by(.name,.version) else . end' raw_cyclonedx_report.json > cyclonedx_report.json
+
+          if [ ! -s cyclonedx_report.json ]; then
+            echo "❌ SBOM normalizado está vazio ou não foi gerado corretamente."
+            exit 1
+          fi
+
+    - name: Enviar SBOM ao Dependency-Track
+      env:
+          DT_SCA_ENDPOINT: ${{ secrets.DT_SCA_ENDPOINT }}
+          DT_TOKEN: ${{ secrets.DT_TOKEN }}
+      run: |
+          echo "🔐 Codificando SBOM em base64..."
+          BOMCONTENT=$(base64 -w 0 < cyclonedx_report.json)
+
+          echo "📦 Montando payload..."
+          PAYLOAD=$(jq -n \
+            --arg name "${{ inputs.name }}" \
+            --arg version "main" \
+            --arg bom "$BOMCONTENT" \
+            '{projectName: $name, projectVersion: $version, autoCreate: true, bom: $bom}')
+
+          echo "$PAYLOAD" > bom_payload.json
+
+          echo "📤 Enviando SBOM para o Dependency-Track..."
+          RESPONSE=$(curl -s -w "%{http_code}" -o response.json -X PUT "${DT_SCA_ENDPOINT}/v1/bom" \
+            -H "X-API-Key: ${DT_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "@bom_payload.json")
+
+          HTTP_STATUS=$(tail -n1 <<< "$RESPONSE")
+          if [ "$HTTP_STATUS" -ne 200 ]; then
+            echo "❌ Falha ao enviar SBOM. Status HTTP: $HTTP_STATUS"
+            cat response.json
+            exit 1
+          fi
+
+          sbomToken=$(jq -r '.token' response.json)
+          if [ -z "$sbomToken" ] || [ "$sbomToken" == "null" ]; then
+            echo "❌ Token de processamento do SBOM não encontrado."
+            exit 1
+          fi
+
+          echo "⏳ Aguardando processamento do SBOM..."
+          for i in {1..25}; do
+            STATUS=$(curl -s -X GET "${DT_SCA_ENDPOINT}/v1/bom/token/${sbomToken}" \
+              -H "X-API-Key: ${DT_TOKEN}" \
+              -H "Content-Type: application/json")
+            processing=$(echo "$STATUS" | jq -r '.processing')
+            if [ "$processing" == "false" ]; then
+              echo "✅ Processamento concluído!"
+              break
+            fi
+            echo "⌛ Ainda processando... tentativa $i"
+            sleep 5
+          done

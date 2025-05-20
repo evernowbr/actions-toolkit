@@ -78,7 +78,7 @@ jobs:
         fortify_max_scan_time: ${{ inputs.fortify_max_scan_time }}
         fortify_max_total_time: ${{ inputs.fortify_max_total_timename }}
         fortify_ssc_api_url: ${{ secrets.FORTIFY_SSC_API_URL }}
-        fortify_unifield_login_token: ${{ secrets.FORTIFY_UNIFIED_LOGIN_TOKEN }}
+        fortify_unified_login_token: ${{ secrets.FORTIFY_UNIFIED_LOGIN_TOKEN }}
         fortify_controller_url: ${{ secrets.FORTIFY_CONTROLLER_URL }}
         fortify_controller_token: ${{ secrets.FORTIFY_CONTROLLER_TOKEN }}
       run: |

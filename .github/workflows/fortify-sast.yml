@@ -67,6 +67,7 @@ jobs:
         fortify_project_name: ${{ inputs.name }}
         fortify_version_name: ${{ inputs.version }}
         fortify_translate_name: ${{ inputs.fortify_translate_name }}
+        fortify_scancentral_tool: ${{ inputs.fortify_scancentral_tool }}
         fortify_translate_additional_flags: ${{ inputs.fortify_translate_additional_flags }}
         fortify_polling_delay: ${{ inputs.fortify_polling_delay }}
         fortify_not_found_time: ${{ inputs.fortify_not_found_time }}

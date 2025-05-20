@@ -2,21 +2,60 @@
 
 name: Fortify SAST
 
-# Controls when the action will run. Workflow runs when manually triggered using the UI
-# or API.
 on:
-  workflow_dispatch:
-    # Inputs the workflow accepts.
+  workflow_call:
     inputs:
       name:
-        # Friendly description to be shown in the UI instead of 'name'
-        description: 'Person to greet'
-        # Default value if no value is explicitly provided
-        default: 'World'
-        # Input has to be provided for the workflow to run
         required: true
-        # The data type of the input
         type: string
+      version:
+        required: true
+        type: string
+      fortify_scancentral_tool:
+        required: true
+        type: string
+      fortify_translate_name:
+        required: true
+        type: string
+      fortify_translate_additional_flags:
+        required: true
+        type: string
+      fortify_polling_delay:
+        required: true
+        type: string
+      fortify_not_found_time:
+        required: true
+        type: string
+      fortify_pending_time:
+          required: true
+          type: string
+      fortify_scan_time:
+          required: true
+          type: string
+      fortify_total_time:
+          required: true
+          type: string
+      fortify_max_not_found_time:
+          required: true
+          type: string
+      fortify_max_pending_time:
+          required: true
+          type: string
+      fortify_max_scan_time:
+          required: true
+          type: string
+      fortify_max_total_time:
+          required: true
+          type: string
+    secrets:
+      FORTIFY_SSC_API_URL:
+        required: true
+      FORTIFY_UNIFIED_LOGIN_TOKEN:
+        required: true
+      FORTIFY_CONTROLLER_URL:
+        required: true
+      FORTIFY_CONTROLLER_TOKEN:
+        required: true
 
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:

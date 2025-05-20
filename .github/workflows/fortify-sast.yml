@@ -57,30 +57,30 @@ on:
         
 jobs:
   fortify-sast-scan:
-    name: Fortify SAST Scan
+    name: Run scan
     runs-on: self-hosted
 
     steps:
     # Runs a single command using the runners shell
-    - name: Fortify SAST Scan
+    - name: Run Scan
       env:
-      fortify_project_name: ${{ inputs.name }}
-      fortify_version_name: ${{ inputs.version }}
-      fortify_translate_name: ${{ inputs.fortify_translate_name }}
-      fortify_translate_additional_flags: ${{ inputs.fortify_translate_additional_flags }}
-      fortify_polling_delay: ${{ inputs.fortify_polling_delay }}
-      fortify_not_found_time: ${{ inputs.fortify_not_found_time }}
-      fortify_pending_time: ${{ inputs.fortify_pending_time }}
-      fortify_scan_time: ${{ inputs.fortify_scan_time }}
-      fortify_total_time: ${{ inputs.fortify_total_time }}
-      fortify_max_not_found_time: ${{ inputs.fortify_max_not_found_time }}
-      fortify_max_pending_time: ${{ inputs.fortify_max_pending_time }}
-      fortify_max_scan_time: ${{ inputs.fortify_max_scan_time }}
-      fortify_max_total_time: ${{ inputs.fortify_max_total_timename }}
-      fortify_ssc_api_url: ${{ secrets.FORTIFY_SSC_API_URL }}
-      fortify_unifield_login_token: ${{ secrets.FORTIFY_UNIFIED_LOGIN_TOKEN }}
-      fortify_controller_url: ${{ secrets.FORTIFY_CONTROLLER_URL }}
-      fortify_controller_token: ${{ secrets.FORTIFY_CONTROLLER_TOKEN }}
+        fortify_project_name: ${{ inputs.name }}
+        fortify_version_name: ${{ inputs.version }}
+        fortify_translate_name: ${{ inputs.fortify_translate_name }}
+        fortify_translate_additional_flags: ${{ inputs.fortify_translate_additional_flags }}
+        fortify_polling_delay: ${{ inputs.fortify_polling_delay }}
+        fortify_not_found_time: ${{ inputs.fortify_not_found_time }}
+        fortify_pending_time: ${{ inputs.fortify_pending_time }}
+        fortify_scan_time: ${{ inputs.fortify_scan_time }}
+        fortify_total_time: ${{ inputs.fortify_total_time }}
+        fortify_max_not_found_time: ${{ inputs.fortify_max_not_found_time }}
+        fortify_max_pending_time: ${{ inputs.fortify_max_pending_time }}
+        fortify_max_scan_time: ${{ inputs.fortify_max_scan_time }}
+        fortify_max_total_time: ${{ inputs.fortify_max_total_timename }}
+        fortify_ssc_api_url: ${{ secrets.FORTIFY_SSC_API_URL }}
+        fortify_unifield_login_token: ${{ secrets.FORTIFY_UNIFIED_LOGIN_TOKEN }}
+        fortify_controller_url: ${{ secrets.FORTIFY_CONTROLLER_URL }}
+        fortify_controller_token: ${{ secrets.FORTIFY_CONTROLLER_TOKEN }}
       run: |
         #exportar path do scancentral client
         echo "export PATH=\$PATH:/opt/Fortify_ScanCentral_Client_24.4.0_x64/bin" >> /home/github-runner/.bashrc

@@ -17,7 +17,7 @@ on:
 
 jobs:
   dt-security-scan:
-    name: Dependency-Track SCA Scan
+    name: Run Scan
     runs-on: self-hosted
 
     steps:

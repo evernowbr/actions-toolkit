@@ -48,8 +48,8 @@ jobs:
 
           echo "📦 Montando payload"
           PAYLOAD=$(jq -n \
-            --arg name "${{ inputs.name }}" \
-            --arg version "main" \
+            --arg name "${{ github.repository }}" \
+            --arg version "${{ github.ref_name }}" \
             --arg bom "$BOMCONTENT" \
             '{projectName: $name, projectVersion: $version, autoCreate: true, bom: $bom}')
 

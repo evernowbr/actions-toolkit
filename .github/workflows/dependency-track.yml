@@ -61,16 +61,18 @@ jobs:
           echo "$PAYLOAD" > bom_payload.json
 
           echo "📤 Enviando SBOM para o Dependency-Track..."
-          RESPONSE=$(curl -s -w "%{http_code}" -o response.json -X PUT "${DT_SCA_ENDPOINT}/v1/bom" \
+          # Captura o HTTP status e mantém a resposta no arquivo response.json
+          HTTP_STATUS=$(curl -s -o response.json -w "%{http_code}" -X PUT "${DT_SCA_ENDPOINT}/v1/bom" \
             -H "X-API-Key: ${DT_TOKEN}" \
             -H "Content-Type: application/json" \
             -d "@bom_payload.json")
 
-          HTTP_STATUS=$(tail -n1 <<< "$RESPONSE")
           if [[ "$HTTP_STATUS" -lt 200 || "$HTTP_STATUS" -ge 300 ]]; then
             echo "❌ Falha ao enviar SBOM. Status HTTP: $HTTP_STATUS"
             cat response.json
             exit 1
+          else
+            echo "✅ SBOM enviado com sucesso. Status HTTP: $HTTP_STATUS"
           fi
 
           sbomToken=$(jq -r '.token' response.json)
@@ -81,11 +83,10 @@ jobs:
 
           echo "⏳ Aguardando processamento do SBOM..."
           for i in {1..25}; do
-            RESPONSE=$(curl -s -w "%{http_code}" -o status.json -X GET "${DT_SCA_ENDPOINT}/v1/bom/token/${sbomToken}" \
+            HTTP_STATUS=$(curl -s -o status.json -w "%{http_code}" -X GET "${DT_SCA_ENDPOINT}/v1/bom/token/${sbomToken}" \
               -H "X-API-Key: ${DT_TOKEN}" \
               -H "Content-Type: application/json")
 
-            HTTP_STATUS=$(tail -n1 <<< "$RESPONSE")
             if [[ "$HTTP_STATUS" -lt 200 || "$HTTP_STATUS" -ge 300 ]]; then
               echo "❌ Erro ao consultar status do SBOM. Status HTTP: $HTTP_STATUS"
               cat status.json
@@ -95,40 +96,49 @@ jobs:
             PROCESSING=$(jq -r '.processing' status.json)
             if [ "$PROCESSING" == "false" ]; then
               echo "✅ Processamento concluído."
-
-              PROJECT_NAME_URLENCODED=$(echo "$DT_APP_DEFAULT_NAME" | jq -sRr @uri)
-
-              echo "🔍 Consultando UUID do projeto..."
-              RESPONSE=$(curl -s -w "%{http_code}" -o lookup.json -X GET "${DT_SCA_ENDPOINT}/v1/project/lookup?name=${PROJECT_NAME_URLENCODED}&version=${DT_APP_DEFAULT_VERSION}" \
-                -H "X-API-Key: ${DT_TOKEN}" \
-                -H "Content-Type: application/json")
-
-              HTTP_STATUS=$(tail -n1 <<< "$RESPONSE")
-              if [[ "$HTTP_STATUS" -lt 200 || "$HTTP_STATUS" -ge 300 ]]; then
-                echo "❌ Falha ao consultar UUID do projeto. Status HTTP: $HTTP_STATUS"
-                cat lookup.json
-                exit 1
-              fi
-
-              UUID=$(jq -r '.uuid' lookup.json)
-              VIOLATIONS=$(jq -r '.metrics.policyViolationsSecurityUnaudited' lookup.json)
-
-              if [ -z "$UUID" ] || [ "$UUID" == "null" ]; then
-                echo "❌ UUID do projeto não encontrado."
-                exit 1
-              fi
-
-              echo "🔎 UUID do projeto: $UUID"
-              echo "🔐 Violações de segurança não auditadas: $VIOLATIONS"
-
-              echo "##vso[task.setvariable variable=GATE_VALIDATION]$VIOLATIONS"
-              exit 0
+              break
             fi
 
-            echo "⌛ Tentativa $i: ainda processando..."
-            sleep 5
+            echo "⏳ SBOM ainda está sendo processado, tentando novamente... ($i/25)"
+            sleep 10
           done
 
-          echo "⏱️ Tempo excedido aguardando o processamento do SBOM."
-          exit 1
+          if [ "$PROCESSING" != "false" ]; then
+            echo "❌ Timeout aguardando o processamento do SBOM."
+            exit 1
+          fi
+
+          # URL encode do nome do projeto
+          PROJECT_NAME_URLENCODED=$(printf '%s' "$DT_APP_DEFAULT_NAME" | jq -sRr @uri)
+
+          echo "🔍 Consultando UUID do projeto..."
+          HTTP_STATUS=$(curl -s -o lookup.json -w "%{http_code}" -X GET "${DT_SCA_ENDPOINT}/v1/project/lookup?name=${PROJECT_NAME_URLENCODED}&version=${DT_APP_DEFAULT_VERSION}" \
+            -H "X-API-Key: ${DT_TOKEN}" \
+            -H "Content-Type: application/json")
+
+          if [[ "$HTTP_STATUS" -lt 200 || "$HTTP_STATUS" -ge 300 ]]; then
+            echo "❌ Falha ao consultar UUID do projeto. Status HTTP: $HTTP_STATUS"
+            cat lookup.json
+            exit 1
+          fi
+
+          UUID=$(jq -r '.uuid' lookup.json)
+          VIOLATIONS=$(jq -r '.metrics.policyViolationsSecurityUnaudited // 0' lookup.json)
+
+          if [ -z "$UUID" ] || [ "$UUID" == "null" ]; then
+            echo "❌ UUID do projeto não encontrado."
+            exit 1
+          fi
+
+          echo "✅ UUID do projeto encontrado: $UUID"
+          echo "⚠️ Violations Security Unaudited: $VIOLATIONS"
+
+          # Aqui você pode adicionar mais passos, por exemplo, bloquear o pipeline se houver violações
+          if [ "$VIOLATIONS" -gt 0 ]; then
+            echo "❌ Existem violações de segurança não auditadas. Abortando pipeline."
+            exit 1
+          else
+            echo "✅ Nenhuma violação de segurança não auditada encontrada."
+          fi
+
    

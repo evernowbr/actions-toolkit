@@ -61,7 +61,7 @@ jobs:
           echo "$PAYLOAD" > bom_payload.json
 
           echo "📤 Enviando SBOM para o Dependency-Track..."
-          RESPONSE=$(curl -s -w "%{http_code}" -o response.json -X PUT "${DT_SCA_ENDPOINT}/v1/bom" \
+          RESPONSE=$(curl -K -s -w "%{http_code}" -o response.json -X PUT "${DT_SCA_ENDPOINT}/v1/bom" \
             -H "X-API-Key: ${DT_TOKEN}" \
             -H "Content-Type: application/json" \
             -d "@bom_payload.json")
@@ -81,7 +81,7 @@ jobs:
 
           echo "⏳ Aguardando processamento do SBOM..."
           for i in {1..25}; do
-            RESPONSE=$(curl -s -w "%{http_code}" -o status.json -X GET "${DT_SCA_ENDPOINT}/v1/bom/token/${sbomToken}" \
+            RESPONSE=$(curl -K -s -w "%{http_code}" -o status.json -X GET "${DT_SCA_ENDPOINT}/v1/bom/token/${sbomToken}" \
               -H "X-API-Key: ${DT_TOKEN}" \
               -H "Content-Type: application/json")
 
@@ -99,7 +99,7 @@ jobs:
               PROJECT_NAME_URLENCODED=$(echo "$DT_APP_DEFAULT_NAME" | jq -sRr @uri)
 
               echo "🔍 Consultando UUID do projeto..."
-              RESPONSE=$(curl -s -w "%{http_code}" -o lookup.json -X GET "${DT_SCA_ENDPOINT}/v1/project/lookup?name=${PROJECT_NAME_URLENCODED}&version=${DT_APP_DEFAULT_VERSION}" \
+              RESPONSE=$(curl -K -s -w "%{http_code}" -o lookup.json -X GET "${DT_SCA_ENDPOINT}/v1/project/lookup?name=${PROJECT_NAME_URLENCODED}&version=${DT_APP_DEFAULT_VERSION}" \
                 -H "X-API-Key: ${DT_TOKEN}" \
                 -H "Content-Type: application/json")
 

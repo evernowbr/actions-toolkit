@@ -1,4 +1,4 @@
-name: Dependency-Track SCA
+name: Dependency-Track
 
 on:
   workflow_call:
@@ -17,6 +17,7 @@ on:
 
 jobs:
   dt-security-scan:
+    name: Dependency-Track SCA Scan
     runs-on: self-hosted
 
     steps:

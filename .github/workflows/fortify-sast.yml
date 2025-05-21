@@ -205,20 +205,17 @@ jobs:
 
                     echo "[DEBUG] Código de resposta: $response_code"
 
-                    # Job ainda não está disponível na API do SSC
-                    if [ "$response_code" -eq 409 ]; then
-                        fortify_message=$(echo "$response" | jq -r '.message')
-                        echo "[AVISO] Status da execução do job: $fortify_message"
-                    
+                	# O job foi enviado, mas ainda não está disponível na API do SSC
+                    if [ "$response_code" == "409" ]; then
+                        fortify_message=$(echo "$response" | jq '.message' | sed 's/"//g')
                         ((fortify_not_found_time++))
                         if [ "$fortify_not_found_time" -ge "$fortify_max_not_found_time" ]; then
-                            echo "[ERRO] Excedido o tempo limite para localização do job no SSC."
+                            echo "[ ERRO ] Excedido o tempo limite para localização do job no SSC."
                             exit 1
                         fi
-                    
-                        echo "[INFO] Aguardando $fortify_polling_delay segundos para nova tentativa..."
-                        sleep "$fortify_polling_delay"
                     fi
+
+
 
                     # Job encontrado com sucesso
                     elif [ "$response_code" == "200" ]; then

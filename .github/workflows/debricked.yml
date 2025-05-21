@@ -6,7 +6,7 @@ on:
         required: true
 
 jobs:
-  debricked-run-scan:
+  scan:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -33,7 +33,6 @@ jobs:
         runs-on: self-hosted
 
         steps:
-            # Runs a single command using the runners shell
             - name: Run Scan
               env:
                   fortify_project_name: ${{ inputs.name }}
@@ -188,23 +187,35 @@ jobs:
                       "name": "teste",
                       "bypass": "true"
                     }
-                  ]'  
-          
+                  ]'
+                  
                   # Regra default
-                  gate=$(echo $regras_json | jq --compact-output --raw-output '.[] | select(.name=="default") | .gate')
-                  if [ "$gate" == "" ]; then
-                      echo " ❌ Não há regra default definida para o projeto no Fortify"
+                  gate=$(echo "$regras_json" | jq --compact-output --raw-output '.[] | select(.name=="default") | .gate')
+                  if [ -z "$gate" ]; then
+                      echo "❌ Não há regra default definida para o projeto no Fortify"
                       exit 1
                   fi
-                  bypass=$(echo $regras_json | jq --compact-output --raw-output '.[] | select(.name=="default") | .bypass')
-            
+                  
+                  bypass=$(echo "$regras_json" | jq --compact-output --raw-output '.[] | select(.name=="default") | .bypass')
+                  
                   filtro_aplicado=$gate
-          
-                  # Se o gate estiver habilitado, consultar o número de findings que atendem os critérios
+                  
+                  # Executa o ScanCentral (exemplo, substitua pelas suas variáveis)
+                  output=$($fortify_scancentral_tool -ssctoken "$fortify_controller_token" -url "$fortify_controller_url" start -bt none -block --log-file fortify.log --overwrite -application "$fortify_project_name" -version "$fortify_version_name" --upload-to-ssc --ssc-upload-token "$fortify_controller_token" 2>&1 | tee /dev/stderr)
+                  exit_code=$?
+                  
+                  if [ $exit_code -ne 0 ]; then
+                      echo "❌ ScanCentral retornou erro com exit code $exit_code"
+                      echo "Saída do comando:"
+                      echo "$output"
+                      exit $exit_code
+                  fi
+                  
+                  # Aplica ou não o gate conforme bypass
                   if [ "$bypass" == "true" ]; then
-                      echo "✅ Bypass desabilitado para esta regra. O gate não será aplicado." 
+                      echo "✅ Bypass habilitado para esta regra. O gate NÃO será aplicado."
                   else
-                      echo "✅ Bypass habilitado para esta regra. O gate será aplicado."
+                      echo "✅ Bypass desabilitado para esta regra. O gate será aplicado."
                       echo "🔍 Filtro aplicado: $filtro_aplicado"
                       filtro_url_encoded=$(echo "$filtro_aplicado" | jq -sRr '@uri')
                       echo "🔍 Consultando vulnerabilidades no SSC..."
@@ -212,10 +223,12 @@ jobs:
                           --header 'Accept: application/json' \
                           --header "Authorization: FortifyToken $fortify_unified_login_token" \
                           "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/issues?qm=issues&q=$filtro_url_encoded")
-                      exit_code=$?
-                      fortify_verificar_resposta_api
-                      num_issues=$(echo $response | jq '.count')
-                      
+                      exit_code_curl=$?
+                      if [ $exit_code_curl -ne 0 ]; then
+                          echo "❌ Erro ao consultar API SSC. Código: $exit_code_curl"
+                          exit 1
+                      fi
+                      num_issues=$(echo "$response" | jq '.count // 0')
                       if [ "$num_issues" -gt 0 ]; then
                           echo "❌ Gate falhou: $num_issues issues encontradas após o Gate."
                           echo "📄 Verifique o relatório publicado."
@@ -226,3 +239,4 @@ jobs:
                           echo "🟢 Pipeline liberada."
                       fi
                   fi
+                  

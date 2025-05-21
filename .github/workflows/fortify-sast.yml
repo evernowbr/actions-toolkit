@@ -20,31 +20,31 @@ on:
                 type: string
             fortify_polling_delay:
                 required: true
-                type: string
+                type: number
             fortify_not_found_time:
                 required: true
-                type: string
+                type: number
             fortify_pending_time:
                 required: true
-                type: string
+                type: number
             fortify_scan_time:
                 required: true
-                type: string
+                type: number
             fortify_total_time:
                 required: true
-                type: string
+                type: number
             fortify_max_not_found_time:
                 required: true
-                type: string
+                type: number
             fortify_max_pending_time:
                 required: true
-                type: string
+                type: number
             fortify_max_scan_time:
                 required: true
-                type: string
+                type: number
             fortify_max_total_time:
                 required: true
-                type: string
+                type: number
         secrets:
             FORTIFY_SSC_API_URL:
                 required: true

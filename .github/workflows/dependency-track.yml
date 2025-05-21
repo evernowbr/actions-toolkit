@@ -16,7 +16,7 @@ on:
         required: true
 
 jobs:
-  dt-run-scan:
+  scan:
     runs-on: self-hosted
 
     steps:

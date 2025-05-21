@@ -179,8 +179,17 @@ jobs:
                       echo "✅ Arquivos para scan enviados com sucesso. ID do Scan: $fortify_job_token"
                   fi
 
+                  fortify_polling_delay=60
+                  fortify_not_found_time=0
+                  fortify_pending_time=0
+                  fortify_scan_time=0
+                  fortify_total_time=0
+                  fortify_max_not_found_time=5
+                  fortify_max_pending_time=60
+                  fortify_max_scan_time=60
+                  fortify_max_total_time=120
                   echo "🔍 Monitorando execução do job $fortify_job_token..."
-
+            
                   while true
                     do
                         response=$(curl -s -k -X GET \

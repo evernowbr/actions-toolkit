@@ -154,13 +154,14 @@ jobs:
                     $fortify_scancentral_tool -ssctoken $fortify_controller_token -url $fortify_controller_url \
                       start $fortify_translate_name -block --log-file fortify.log --overwrite \
                       -application $fortify_project_name -version $fortify_version_name \
-                      --upload-to-ssc --ssc-upload-token $fortify_controller_token $fortify_translate_additional_flags"
+                      --upload-to-ssc --ssc-upload-token $fortify_controller_token $fortify_translate_additional_flags" \
+                      | tee /dev/stderr; } 2>&1 )
                     
-                    # Captura a saída do comando na variável 'output'
-                    output=$($fortify_scancentral_tool -ssctoken $fortify_controller_token -url $fortify_controller_url \
-                      start $fortify_translate_name -block --log-file fortify.log --overwrite \
-                      -application $fortify_project_name -version $fortify_version_name \
-                      --upload-to-ssc --ssc-upload-token $fortify_controller_token $fortify_translate_additional_flags)
+                    output=$( { $fortify_scancentral_tool -ssctoken "$fortify_controller_token" -url "$fortify_controller_url" \
+                      start "$fortify_translate_name" -block --log-file fortify.log --overwrite \
+                      -application "$fortify_project_name" -version "$fortify_version_name" \
+                      --upload-to-ssc --ssc-upload-token "$fortify_controller_token" $fortify_translate_additional_flags \
+                      | tee /dev/stderr; } 2>&1 )
 
                   # Verifica o código de resposta
                   fortify_verificar_codigo_de_resposta
@@ -186,7 +187,18 @@ jobs:
 
                   echo "⚙️ Processando regras para projeto $fortify_project..."
 
-                  regras_json=$(cat ./fortify-regras-gate.json)
+                  regras_json='[
+                    {
+                      "gate": "audited:false [fortify priority order]:critical [fortify priority order]:high",
+                      "name": "default",
+                      "bypass": "false"
+                    },
+                    {
+                      "gate": "audited:false [fortify priority order]:critical [fortify priority order]:high",
+                      "name": "teste",
+                      "bypass": "true"
+                    }
+                  ]'
 
                   # Regra default
                   gate=$(echo $regras_json | jq --compact-output --raw-output '.[] | select(.name=="default") | .gate')

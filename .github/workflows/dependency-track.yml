@@ -26,6 +26,11 @@ jobs:
 
       - name: Generate SBOM using Syft
         run: |
+          echo'   ____       ___ __  '
+          echo'  / __/__ __ / _// /_ '
+          echo' _\ \ / // // _// __/ '
+          echo'/___/ \_, //_/  \__/  '
+          echo'     /___/            '
           echo "🔧 Gerando SBOM da aplicação" 
           syft dir:"${{ github.workspace }}" --verbose -o cyclonedx-json=raw_cyclonedx_report.json
 

@@ -36,7 +36,7 @@ jobs:
           syft dir:"${{ github.workspace }}" --verbose -o cyclonedx-json=raw_cyclonedx_report.json
 
           if [ $? -ne 0 ]; then
-            echo "❌ Erro ao gerar o SBOM com Syft"
+            echo "❌ Erro ao gerar o SBOM (Software Bill of Materials) com Syft"
             exit 1
           fi
 
@@ -44,7 +44,7 @@ jobs:
           jq 'if .components then .components |= unique_by(.name,.version) else . end' raw_cyclonedx_report.json > cyclonedx_report.json
 
           if [ ! -s cyclonedx_report.json ]; then
-            echo "❌ SBOM normalizado está vazio ou não foi gerado corretamente."
+            echo "❌ SBOM (Software Bill of Materials) normalizado está vazio ou não foi gerado corretamente."
             exit 1
           fi
 
@@ -63,15 +63,29 @@ jobs:
           /____/ \__// .__/\__//_//_/\_,_/ \__//_//_/\__/ \_, /      /_/  /_/   \_,_/ \__//_/\_\  
                     /_/                                  /___/                                    
           EOF
-          echo "🔐 Codificando SBOM em base64"
+          echo "🔐 Codificando SBOM em base64..."
           BOMCONTENT=$(base64 -w 0 < cyclonedx_report.json)
+          
+          if [ $? -ne 0 ]; then
+            echo "❌ Erro codificar SBOM em base64"
+            exit 1
+          else
+            echo "✅ SBPM codificado com sucesso!"
+          fi
 
-          echo "📦 Montando payload"
+          echo "📦 Montando payload..."
           PAYLOAD=$(jq -n \
             --arg name "$DT_APP_DEFAULT_NAME" \
             --arg version "$DT_APP_DEFAULT_VERSION" \
             --arg bom "$BOMCONTENT" \
             '{projectName: $name, projectVersion: $version, autoCreate: true, bom: $bom}')
+          
+          if [ $? -ne 0 ]; then
+            echo "❌ Erro ao montar o payload com jq"
+            exit 1
+          else
+            echo "✅ Payload montado com sucesso!"
+          fi
 
           echo "$PAYLOAD" > bom_payload.json
 
@@ -138,7 +152,7 @@ jobs:
           fi
 
           UUID=$(jq -r '.uuid' lookup.json)
-          echo "🚀 $UUID do Projeto: $DT_APP_DEFAULT_NAME - Versão: $DT_APP_DEFAULT_VERSION"
+          echo "🚀 $UUID do projeto$DT_APP_DEFAULT_NAME $DT_APP_DEFAULT_VERSION"
           VIOLATIONS=$(jq -r '.metrics.policyViolationsSecurityUnaudited // 0' lookup.json)
 
           if [ -z "$UUID" ] || [ "$UUID" == "null" ]; then

@@ -184,7 +184,7 @@ jobs:
                   fortify_pending_time=0
                   fortify_scan_time=0
                   fortify_total_time=0
-                  fortify_max_not_found_time=5
+                  fortify_max_not_found_time=20
                   fortify_max_pending_time=60
                   fortify_max_scan_time=60
                   fortify_max_total_time=120

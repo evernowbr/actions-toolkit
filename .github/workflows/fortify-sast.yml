@@ -150,53 +150,54 @@ jobs:
                   fortify_configurar_projeto
                   fortify_regras_processamento
 
-                    echo "🔧 Executando Scancentral Client 
-                    $fortify_scancentral_tool -ssctoken $fortify_controller_token -url $fortify_controller_url \
-                      start $fortify_translate_name -block --log-file fortify.log --overwrite \
-                      -application $fortify_project_name -version $fortify_version_name \
-                      --upload-to-ssc --ssc-upload-token $fortify_controller_token $fortify_translate_additional_flags | tee /dev/stderr; } 2>&1 )"
+                  echo "🔧 Executando Scancentral Client"
+
+                    output=$(
+                      { 
+                        $fortify_scancentral_tool -ssctoken "$fortify_controller_token" -url "$fortify_controller_url" \
+                          start "$fortify_translate_name" -block --log-file fortify.log --overwrite \
+                          -application "$fortify_project_name" -version "$fortify_version_name" \
+                          --upload-to-ssc --ssc-upload-token "$fortify_controller_token" \
+                          $fortify_translate_additional_flags | tee /dev/stderr
+                      } 2>&1
+                    )
                     
-                    output=$( { $fortify_scancentral_tool -ssctoken "$fortify_controller_token" -url "$fortify_controller_url" \
-                      start "$fortify_translate_name" -block --log-file fortify.log --overwrite \
-                      -application "$fortify_project_name" -version "$fortify_version_name" \
-                      --upload-to-ssc --ssc-upload-token "$fortify_controller_token" $fortify_translate_additional_flags | tee /dev/stderr; } 2>&1 )
-
-                  # Verifica o código de resposta
-                  fortify_verificar_codigo_de_resposta
-
-                  # Extrai o job token da saída usando grep e expressões regulares
-                  fortify_job_token=$(echo "$output" | grep "Submitted job and received token" | grep -E -o "[a-f0-9-]{36}")
-
-                  # Verifica se o job token foi encontrado
-                  if [ "$fortify_job_token" == "" ]; then
-                      echo "❌ Job token não foi criado."
-                      exit 1
-                  else
-                      echo "✅ Arquivos para scan enviados com sucesso. ID do Scan: $fortify_job_token"
-                  fi
-                  
-                  cat <<'EOF'
-                    ____            _  __   ___        ____                      _  __          _____       __       
-                    / __/___   ____ (_)/ /_ / _/__ __  / __/___  ____ __ __ ____ (_)/ /_ __ __  / ___/___ _ / /_ ___  
-                  / _/ / _ \ / __// // __// _// // / _\ \ / -_)/ __// // // __// // __// // / / (_ // _ `// __// -_) 
-                  /_/   \___//_/  /_/ \__//_/  \_, / /___/ \__/ \__/ \_,_//_/  /_/ \__/ \_, /  \___/ \_,_/ \__/ \__/  
-                                              /___/                                    /___/                          
-                  EOF
-
-                  echo "⚙️ Processando regras para projeto $fortify_project..."
-
-                  regras_json='[
-                    {
-                      "gate": "audited:false [fortify priority order]:critical [fortify priority order]:high",
-                      "name": "default",
-                      "bypass": "false"
-                    },
-                    {
-                      "gate": "audited:false [fortify priority order]:critical [fortify priority order]:high",
-                      "name": "teste",
-                      "bypass": "true"
-                    }
-                  ]'
+                    # Verifica o código de resposta
+                    fortify_verificar_codigo_de_resposta
+                    
+                    # Extrai o job token da saída usando grep e regex
+                    fortify_job_token=$(echo "$output" | grep "Submitted job and received token" | grep -E -o "[a-f0-9-]{36}")
+                    
+                    # Verifica se o job token foi encontrado
+                    if [ -z "$fortify_job_token" ]; then
+                        echo "❌ Job token não foi criado."
+                        exit 1
+                    else
+                        echo "✅ Arquivos para scan enviados com sucesso. ID do Scan: $fortify_job_token"
+                    fi
+                    
+                    cat <<'EOF'
+                      ____            _  __   ___        ____                      _  __          _____       __       
+                     / __/___   ____ (_)/ /_ / _/__ __  / __/___  ____ __ __ ____ (_)/ /_ __ __  / ___/___ _ / /_ ___  
+                    /_/ // _ \ / __// // __// _// // / _\ \ / -_)/ __// // // __// // __// // / / (_ // _ `// __// -_) 
+                    \__/ \___//_/  /_/ \__//_/  \_, / /___/ \__/ \__/ \_,_//_/  /_/ \__/ \_, /  \___/ \_,_/ \__/ \__/  
+                                               /___/                               /___/                                
+                    EOF
+                    
+                    echo "⚙️ Processando regras para projeto $fortify_project..."
+                    
+                    regras_json='[
+                      {
+                        "gate": "audited:false [fortify priority order]:critical [fortify priority order]:high",
+                        "name": "default",
+                        "bypass": "false"
+                      },
+                      {
+                        "gate": "audited:false [fortify priority order]:critical [fortify priority order]:high",
+                        "name": "teste",
+                        "bypass": "true"
+                      }
+                    ]  
 
                   # Regra default
                   gate=$(echo $regras_json | jq --compact-output --raw-output '.[] | select(.name=="default") | .gate')

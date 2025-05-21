@@ -7,6 +7,7 @@ on:
 
 jobs:
   debricked-sca-scan:
+    -name: Run Scan
     runs-on: ubuntu-latest
 
     steps:

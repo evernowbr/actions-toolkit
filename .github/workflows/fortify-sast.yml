@@ -152,13 +152,13 @@ jobs:
 
                     echo "🔧 Executando Scancentral Client 
                     $fortify_scancentral_tool -ssctoken $fortify_controller_token -url $fortify_controller_url \
-                      start $fortify_translate_name -block \
+                      start $fortify_translate_name -block --log-file fortify.log --overwrite \
                       -application $fortify_project_name -version $fortify_version_name \
                       --upload-to-ssc --ssc-upload-token $fortify_controller_token $fortify_translate_additional_flags"
                     
                     # Captura a saída do comando na variável 'output'
                     output=$($fortify_scancentral_tool -ssctoken $fortify_controller_token -url $fortify_controller_url \
-                      start $fortify_translate_name -block\
+                      start $fortify_translate_name -block --log-file fortify.log --overwrite \
                       -application $fortify_project_name -version $fortify_version_name \
                       --upload-to-ssc --ssc-upload-token $fortify_controller_token $fortify_translate_additional_flags)
 

@@ -202,7 +202,9 @@ jobs:
                         echo "[DEBUG] Resposta da API: $response"
                     
                         response_code=$(echo "$response" | jq '.responseCode')
-                    
+
+                        echo "[DEBUG] Response Code: $response_code"
+                        echo "[DEBUG] fortify_polling_delay: $fortify_polling_delay"
                         # O job foi enviado, mas ainda não está disponível na API do SSC
                         if [ "$response_code" == "409" ]; then
                             fortify_message=$(echo "$response" | jq '.message' | sed 's/"//g')

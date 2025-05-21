@@ -169,7 +169,7 @@ jobs:
                         echo "✅ Arquivos para scan enviados com sucesso. ID do Scan: $fortify_job_token"
                     fi
                     
-                    echo "⚙️ Iniciando processamento das regras de gate para o projeto: **$fortify_project**"
+                    echo "⚙️ Iniciando processamento das regras de gate para o projeto."
                     
                     regras_json='[
                       {
@@ -199,7 +199,7 @@ jobs:
                         echo "⚠️  Bypass ativado: a regra 'default' não será aplicada."
                         echo "✅ Continuação do pipeline permitida."
                     else
-                        echo "🔒 Bypass desativado: a regra 'default' será **aplicada**."
+                        echo "🔒 Bypass desativado: a regra 'default' será aplicada."
                         echo "🔍 Filtro aplicado: \`$filtro_aplicado\`"
                         filtro_url_encoded=$(echo "$filtro_aplicado" | jq -sRr '@uri')
                         echo "📡 Consultando vulnerabilidades no Fortify SSC..."
@@ -217,9 +217,17 @@ jobs:
                         if [ "$num_issues" -gt 0 ]; then
                             echo "❌ Gate falhou: **$num_issues** vulnerabilidades encontradas com base no filtro aplicado."
                             echo "📄 Verifique o relatório publicado para mais detalhes."
+                            echo '  _____       __         ____       _  __ '
+                            echo ' / ___/___ _ / /_ ___   / __/___ _ (_)/ / '
+                            echo '/ (_ // _ `// __// -_) / _/ / _ `// // /  '
+                            echo '\___/ \_,_/ \__/ \__/ /_/   \_,_//_//_/   '
                             exit 1
                         else
                             echo "✅ Gate aprovado: Nenhuma vulnerabilidade crítica ou alta encontrada."
                             echo "🚀 Continuação do build autorizada."
+                            echo '  _____       __         ___                 '
+                            echo ' / ___/___ _ / /_ ___   / _ \ ___ _ ___  ___ '
+                            echo '/ (_ // _ `// __// -_) / ___// _ `/(_-< (_-< '
+                            echo '\___/ \_,_/ \__/ \__/ /_/    \_,_//___//___/ '
                         fi
                     fi

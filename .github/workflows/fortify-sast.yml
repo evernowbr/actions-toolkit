@@ -220,9 +220,10 @@ jobs:
 
         while true
         do
-        	response=$(curl -s -k -X GET --header "Content-Type: application/json" --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" --trace-ascii fortify-monitorar-scan-trace-$fortify_total_time-GET-cloudjobs.txt "$fortify_ssc_api_url/cloudjobs/$fortify_job_token")
-        	mv fortify-monitorar-scan-trace-$fortify_total_time-GET-cloudjobs.txt $fortify_debug_path/
-        	response_code=$(echo "$response" | jq '.responseCode')
+        	response=$(curl -s -k -X GET --header "Content-Type: application/json" --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/cloudjobs/$fortify_job_token")
+        	echo "debug"
+          echo $response
+          response_code=$(echo "$response" | jq '.responseCode')
         
         	# O job foi enviado, mas ainda não está disponível na API do SSC
         	if [ "$response_code" == "409" ];

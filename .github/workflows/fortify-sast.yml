@@ -46,7 +46,6 @@ jobs:
                   fortify_controller_url: ${{ secrets.FORTIFY_CONTROLLER_URL }}
                   fortify_controller_token: ${{ secrets.FORTIFY_CONTROLLER_TOKEN }}
               run: |
-                  set -euo pipefail
                   echo "Executando Fortify SAST"
                   echo "export PATH=\$PATH:/opt/Fortify_ScanCentral_Client_24.4.0_x64/bin" >> /home/github-runner/.bashrc
                   source ~/.bashrc

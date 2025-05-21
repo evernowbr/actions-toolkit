@@ -29,7 +29,7 @@ on:
                 required: true
 
 jobs:
-    fortify-run-scan:
+    scan:
         runs-on: self-hosted
 
         steps:

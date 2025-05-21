@@ -181,95 +181,79 @@ jobs:
 
                   echo "🔍 Monitorando execução do job $fortify_job_token..."
 
-                  fortify_polling_delay=60
-                  fortify_not_found_time=0
-                  fortify_pending_time=0
-                  fortify_scan_time=0
-                  fortify_total_time=0
-                  fortify_max_not_found_time=5
-                  fortify_max_pending_time=60
-                  fortify_max_scan_time=60
-                  fortify_max_total_time=120
-                
                   while true
-                  do
-                    response=$(curl -s -k -X GET \
-                        --header "Content-Type: application/json" \
-                        --header "Accept: application/json" \
-                        --header "Authorization: FortifyToken $fortify_unified_login_token" \
-                        "$fortify_ssc_api_url/cloudjobs/$fortify_job_token")
-
-                    echo "[DEBUG] Resposta da API: $response"
-
-                    response_code=$(echo "$response" | jq -r '.responseCode')
-
-                    echo "[DEBUG] Código de resposta: $response_code"
-
-                	# O job foi enviado, mas ainda não está disponível na API do SSC
-                    if [ "$response_code" == "409" ]; then
-                        fortify_message=$(echo "$response" | jq '.message' | sed 's/"//g')
-                        ((fortify_not_found_time++))
-                        if [ "$fortify_not_found_time" -ge "$fortify_max_not_found_time" ]; then
-                            echo "[ ERRO ] Excedido o tempo limite para localização do job no SSC."
-                            exit 1
-                        fi
-                    fi
-
-
-
-                    # Job encontrado com sucesso
-                    elif [ "$response_code" == "200" ]; then
-                        job_state=$(echo "$response" | jq -r '.data.jobState')
-                        echo "[INFO] Status da execução do job: $job_state"
-
-                        case "$job_state" in
-                            UPLOAD_QUEUED)
-                                # Nada a fazer ainda
-                                ;;
-                            PENDING)
-                                ((fortify_pending_time++))
-                                if [ "$fortify_pending_time" -ge "$fortify_max_pending_time" ]; then
-                                    echo "[ERRO] Excedido o tempo limite para espera na fila de scan do Fortify."
-                                    exit 1
-                                fi
-                                ;;
-                            SCAN_RUNNING)
-                                ((fortify_scan_time++))
-                                if [ "$fortify_scan_time" -ge "$fortify_max_scan_time" ]; then
-                                    echo "[ERRO] Excedido o tempo limite para execução do scan no Fortify."
-                                    exit 1
-                                fi
-                                ;;
-                            UPLOAD_COMPLETED)
-                                echo "[OK] Job $fortify_job_token executado e armazenado com sucesso."
-                                break
-                                ;;
-                            *)
-                                echo "[ERRO] O job $fortify_job_token retornou o estado inesperado: $job_state"
-                                exit 1
-                                ;;
-                        esac
-
-                    # Código de resposta vazio
-                    elif [ -z "$response_code" ]; then
-                        echo "[AVISO] Código de resposta não definido. Verifique logs adicionais."
-                        cat "$fortify_debug_path/fortify-monitorar-scan-trace-$fortify_total_time-GET-cloudjobs.txt"
-
-                    # Qualquer outro código de resposta não tratado
-                    else
-                        fortify_message=$(echo "$response" | jq -r '.message')
-                        echo "[ERRO] O Fortify SSC retornou o código $response_code: $fortify_message"
-                        exit 1
-                    fi
-
-                    sleep "$fortify_polling_delay"
-                    ((fortify_total_time++))
-
-                    if [ "$fortify_total_time" -ge "$fortify_max_total_time" ]; then
-                        echo "[ERRO] Excedido o tempo limite total para execução do job no Fortify."
-                        exit 1
-                    fi
-                  done
+                    do
+                    	response=$(curl -s -k -X GET --header "Content-Type: application/json" --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" --trace-ascii fortify-monitorar-scan-trace-$fortify_total_time-GET-cloudjobs.txt "$fortify_ssc_api_url/cloudjobs/$fortify_job_token")
+                    	response_code=$(echo "$response" | jq '.responseCode')
+                    
+                    	# O job foi enviado, mas ainda não está disponível na API do SSC
+                    	if [ "$response_code" == "409" ];
+                    	then
+                    		fortify_message=$(echo "$response" | jq '.message' | sed 's/"//g')
+                    		((fortify_not_found_time++))
+                    		if [ "$fortify_not_found_time" -ge "$fortify_max_not_found_time" ]; then
+                    			echo "[ ERRO ] Excedido o tempo limite para localização do job no SSC."
+                    			exit 1
+                    		fi
+                    	fi
+                    
+                    	# O job já pode ser localizado na API do SSC
+                    	if [ "$response_code" == "200" ];
+                    	then
+                    		job_state=$(echo "$response" | jq '.data | (.jobState)' | sed 's/"//g')
+                    		logger "Status da execução do job: $job_state"
+                    		case "$job_state" in
+                    			UPLOAD_QUEUED)
+                    				# Nada a fazer
+                    			;;
+                    			PENDING)
+                    				((fortify_pending_time++))
+                    				if [ "$fortify_pending_time" -ge "$fortify_max_pending_time" ]; then
+                    					echo "[ ERRO ] Excedido o tempo limite para espera na fila de scan do Fortify."
+                    					exit 1
+                    				fi
+                    			;;
+                    			SCAN_RUNNING)
+                    				((fortify_scan_time++))
+                    				if [ "$fortify_scan_time" -ge "$fortify_max_scan_time" ]; then
+                    					echo "[ ERRO ] Excedido o tempo limite para espera na fila de scan do Fortify."
+                    					exit 1
+                    				fi
+                    			;;
+                    			UPLOAD_COMPLETED)
+                    				echo "[ OK ] Job $fortify_job_token executado e armazenado com sucesso."
+                    				break
+                    			;;
+                    			*)
+                    				echo "O job $fortify_job_token retornou o estado $job_state."
+                    				exit 1
+                    			;;
+                    		esac
+                    	fi
+                    
+                    	if [ "$response_code" == "" ];
+                    	then
+                    		logger LEVEL=WARNING MESSAGE="Código de resposta não definido."
+                    		cat $fortify_debug_path/fortify-monitorar-scan-trace-$fortify_total_time-GET-cloudjobs.txt
+                    	fi
+                    
+                    	if [ "$response_code" != "" ] && [ "$response_code" != "409" ] && [ "$response_code" != "200" ];
+                    	then
+                    		fortify_message=$(echo "$response" | jq '.message' | sed 's/"//g')
+                    		logger LEVEL=ERROR MESSAGE="[ ERRO ] O Fortify SSC retornou o código $response_code: $fortify_message"
+                            #echo "O Fortify SSC retornou o código $response_code." > .elasticerro
+                    		exit 1
+                    	fi
+                    
+                    	sleep $fortify_polling_delay
+                    	((fortify_total_time++))
+                    	if [ "$fortify_total_time" -ge "$fortify_max_total_time" ]; then
+                    		#echo "[ ERRO ] Excedido o tempo limite total para execução do job no Fortify."
+                            logger LEVEL=ERROR MESSAGE="Excedido o tempo limite total para execução do job no Fortify."
+                    		exit 1
+                    	fi
+                    done  
+                
 
 
                   cat <<'EOF'

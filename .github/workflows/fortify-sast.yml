@@ -18,33 +18,6 @@ on:
             fortify_translate_additional_flags:
                 required: true
                 type: string
-            fortify_polling_delay:
-                required: true
-                type: number
-            fortify_not_found_time:
-                required: true
-                type: number
-            fortify_pending_time:
-                required: true
-                type: number
-            fortify_scan_time:
-                required: true
-                type: number
-            fortify_total_time:
-                required: true
-                type: number
-            fortify_max_not_found_time:
-                required: true
-                type: number
-            fortify_max_pending_time:
-                required: true
-                type: number
-            fortify_max_scan_time:
-                required: true
-                type: number
-            fortify_max_total_time:
-                required: true
-                type: number
         secrets:
             FORTIFY_SSC_API_URL:
                 required: true
@@ -68,15 +41,15 @@ jobs:
                   fortify_translate_name: ${{ inputs.fortify_translate_name }}
                   fortify_scancentral_tool: ${{ inputs.fortify_scancentral_tool }}
                   fortify_translate_additional_flags: ${{ inputs.fortify_translate_additional_flags }}
-                  fortify_polling_delay: ${{ inputs.fortify_polling_delay }}
-                  fortify_not_found_time: ${{ inputs.fortify_not_found_time }}
-                  fortify_pending_time: ${{ inputs.fortify_pending_time }}
-                  fortify_scan_time: ${{ inputs.fortify_scan_time }}
-                  fortify_total_time: ${{ inputs.fortify_total_time }}
-                  fortify_max_not_found_time: ${{ inputs.fortify_max_not_found_time }}
-                  fortify_max_pending_time: ${{ inputs.fortify_max_pending_time }}
-                  fortify_max_scan_time: ${{ inputs.fortify_max_scan_time }}
-                  fortify_max_total_time: ${{ inputs.fortify_max_total_timename }}
+                  fortify_polling_delay: "60"
+                  fortify_not_found_time: "0"
+                  fortify_pending_time: "0"
+                  fortify_scan_time: "0"
+                  fortify_total_time: "0"
+                  fortify_max_not_found_time: "5"
+                  fortify_max_pending_time: "60"
+                  fortify_max_scan_time: "60"
+                  fortify_max_total_time: "120"
                   fortify_ssc_api_url: ${{ secrets.FORTIFY_SSC_API_URL }}
                   fortify_unified_login_token: ${{ secrets.FORTIFY_UNIFIED_LOGIN_TOKEN }}
                   fortify_controller_url: ${{ secrets.FORTIFY_CONTROLLER_URL }}

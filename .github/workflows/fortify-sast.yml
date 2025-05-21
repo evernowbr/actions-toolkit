@@ -188,7 +188,7 @@ jobs:
                       "name": "teste",
                       "bypass": "true"
                     }
-                  ]  
+                  ]'  
           
                   # Regra default
                   gate=$(echo $regras_json | jq --compact-output --raw-output '.[] | select(.name=="default") | .gate')

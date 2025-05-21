@@ -155,7 +155,7 @@ jobs:
                   # Verifica o código de resposta
                   fortify_verificar_codigo_de_resposta
                   
-                                      # Verifica o código de resposta
+                    # Verifica o código de resposta
                     fortify_verificar_codigo_de_resposta
                     
                     # Extrai o job token da saída usando grep e regex
@@ -187,7 +187,7 @@ jobs:
                     # Obtém regra default
                     gate=$(echo "$regras_json" | jq --compact-output --raw-output '.[] | select(.name=="default") | .gate')
                     if [ -z "$gate" ]; then
-                        echo "❌ ERRO: Nenhuma regra 'default' foi definida para o projeto no Fortify."
+                        echo "❌ Nenhuma regra 'default' foi definida para o projeto no Fortify."
                         exit 1
                     fi
                     
@@ -216,7 +216,7 @@ jobs:
                     
                         if [ "$num_issues" -gt 0 ]; then
                             echo "❌ Gate falhou: **$num_issues** vulnerabilidades encontradas com base no filtro aplicado."
-                            echo "📄 Verifique o relatório publicado nos artefatos para mais detalhes."
+                            echo "📄 Verifique o relatório publicado para mais detalhes."
                             exit 1
                         else
                             echo "✅ Gate aprovado: Nenhuma vulnerabilidade crítica ou alta encontrada."

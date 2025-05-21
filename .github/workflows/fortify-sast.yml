@@ -157,7 +157,7 @@ jobs:
                   
                   # Captura a saída do comando na variável 'output'
                   #output=$($fortify_scancentral_tool -ssctoken $fortify_controller_token -url $fortify_controller_url start $fortify_translate_name -block -application $fortify_project_name -version $fortify_version_name --upload-to-ssc --ssc-upload-token $fortify_controller_token $fortify_translate_additional_flags)
-                  output=$($fortify_scancentral_tool -url $fortify_controller_url -ssctoken $fortify_controller_token -debug start -bt none -upload -block --application $fortify_project_name -version --application-version $fortify_version_name -uptoken $fortify_controller_token)
+                  $fortify_scancentral_tool -url $fortify_controller_url -ssctoken $fortify_controller_token -start -bt none -upload -block --application $fortify_project_name -version --application-version $fortify_version_name -uptoken $fortify_controller_token
                   # Exibe a saída
                   echo "🔧 $output"
 

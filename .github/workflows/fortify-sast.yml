@@ -41,20 +41,12 @@ jobs:
                   fortify_translate_name: ${{ inputs.fortify_translate_name }}
                   fortify_scancentral_tool: ${{ inputs.fortify_scancentral_tool }}
                   fortify_translate_additional_flags: ${{ inputs.fortify_translate_additional_flags }}
-                  fortify_polling_delay: "60"
-                  fortify_not_found_time: "0"
-                  fortify_pending_time: "0"
-                  fortify_scan_time: "0"
-                  fortify_total_time: "0"
-                  fortify_max_not_found_time: "5"
-                  fortify_max_pending_time: "60"
-                  fortify_max_scan_time: "60"
-                  fortify_max_total_time: "120"
                   fortify_ssc_api_url: ${{ secrets.FORTIFY_SSC_API_URL }}
                   fortify_unified_login_token: ${{ secrets.FORTIFY_UNIFIED_LOGIN_TOKEN }}
                   fortify_controller_url: ${{ secrets.FORTIFY_CONTROLLER_URL }}
                   fortify_controller_token: ${{ secrets.FORTIFY_CONTROLLER_TOKEN }}
               run: |
+                  set -euo pipefail
                   echo "Executando Fortify SAST"
                   echo "export PATH=\$PATH:/opt/Fortify_ScanCentral_Client_24.4.0_x64/bin" >> /home/github-runner/.bashrc
                   source ~/.bashrc
@@ -190,6 +182,16 @@ jobs:
 
                   echo "🔍 Monitorando execução do job $fortify_job_token..."
 
+                  fortify_polling_delay=60
+                  fortify_not_found_time=0
+                  fortify_pending_time=0
+                  fortify_scan_time=0
+                  fortify_total_time=0
+                  fortify_max_not_found_time=5
+                  fortify_max_pending_time=60
+                  fortify_max_scan_time=60
+                  fortify_max_total_time=120
+                
                   while true
                   do
                     response=$(curl -s -k -X GET \
@@ -205,15 +207,19 @@ jobs:
                     echo "[DEBUG] Código de resposta: $response_code"
 
                     # Job ainda não está disponível na API do SSC
-                    if [ "$response_code" == "409" ]; then
+                    if [ "$response_code" -eq 409 ]; then
                         fortify_message=$(echo "$response" | jq -r '.message')
                         echo "[AVISO] Status da execução do job: $fortify_message"
-
+                    
                         ((fortify_not_found_time++))
                         if [ "$fortify_not_found_time" -ge "$fortify_max_not_found_time" ]; then
                             echo "[ERRO] Excedido o tempo limite para localização do job no SSC."
                             exit 1
                         fi
+                    
+                        echo "[INFO] Aguardando $fortify_polling_delay segundos para nova tentativa..."
+                        sleep "$fortify_polling_delay"
+                    fi
 
                     # Job encontrado com sucesso
                     elif [ "$response_code" == "200" ]; then

@@ -1,6 +1,9 @@
 name: Debricked SCA
 on:
-  workflow_dispatch:
+  workflow_call:
+    secrets:
+      DEBRICKED_TOKEN:
+        required: true
 
 jobs:
   debricked-sca-scan:

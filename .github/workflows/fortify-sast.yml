@@ -155,88 +155,91 @@ jobs:
                   # Verifica o código de resposta
                   fortify_verificar_codigo_de_resposta
                   
-                  # Extrai o job token da saída usando grep e regex
-                  fortify_job_token=$(echo "$output" | grep "Submitted job and received token" | grep  -o "[a-f0-9-]{36}")
-                  
-                  # Verifica se o job token foi encontrado
-                  if [ -z "$fortify_job_token" ]; then
-                      echo "❌ Job token não foi criado."
-                      exit 1
-                  else
-                      echo "📦 Arquivos para scan enviados com sucesso. Jobtoken: $fortify_job_token"
-                  fi
-                  
-                  cat <<'EOF'
-                    ____            _  __   ___        ____                      _  __          _____       __       
-                   / __/___   ____ (_)/ /_ / _/__ __  / __/___  ____ __ __ ____ (_)/ /_ __ __  / ___/___ _ / /_ ___  
-                  /_/ // _ \ / __// // __// _// // / _\ \ / -_)/ __// // // __// // __// // / / (_ // _ `// __// -_) 
-                  \__/ \___//_/  /_/ \__//_/  \_, / /___/ \__/ \__/ \_,_//_/  /_/ \__/ \_, /  \___/ \_,_/ \__/ \__/  
-                                             /___/                               /___/                                
-                  EOF
-                  
-                  echo "⚙️ Processando regras para projeto $fortify_project..."
-                  
-                  regras_json='[
-                    {
-                      "gate": "audited:false [fortify priority order]:critical [fortify priority order]:high",
-                      "name": "default",
-                      "bypass": "false"
-                    },
-                    {
-                      "gate": "audited:false [fortify priority order]:critical [fortify priority order]:high",
-                      "name": "teste",
-                      "bypass": "true"
-                    }
-                  ]'
-                  
-                  # Regra default
-                  gate=$(echo "$regras_json" | jq --compact-output --raw-output '.[] | select(.name=="default") | .gate')
-                  if [ -z "$gate" ]; then
-                      echo "❌ Não há regra default definida para o projeto no Fortify"
-                      exit 1
-                  fi
-                  
-                  bypass=$(echo "$regras_json" | jq --compact-output --raw-output '.[] | select(.name=="default") | .bypass')
-                  
-                  filtro_aplicado=$gate
-                  
-                  # Executa o ScanCentral (exemplo, substitua pelas suas variáveis)
-                  output=$($fortify_scancentral_tool -ssctoken "$fortify_controller_token" -url "$fortify_controller_url" start -bt none -block --log-file fortify.log --overwrite -application "$fortify_project_name" -version "$fortify_version_name" --upload-to-ssc --ssc-upload-token "$fortify_controller_token" 2>&1 | tee /dev/stderr)
-                  exit_code=$?
-                  
-                  if [ $exit_code -ne 0 ]; then
-                      echo "❌ ScanCentral retornou erro com exit code $exit_code"
-                      echo "Saída do comando:"
-                      echo "$output"
-                      exit $exit_code
-                  fi
-                  
-                  # Aplica ou não o gate conforme bypass
-                  if [ "$bypass" == "true" ]; then
-                      echo "✅ Bypass habilitado para esta regra. O gate NÃO será aplicado."
-                  else
-                      echo "✅ Bypass desabilitado para esta regra. O gate será aplicado."
-                      echo "🔍 Filtro aplicado: $filtro_aplicado"
-                      filtro_url_encoded=$(echo "$filtro_aplicado" | jq -sRr '@uri')
-                      echo "🔍 Consultando vulnerabilidades no SSC..."
-                      response=$(curl -sS -k -X GET --header 'Content-Type: application/json' \
-                          --header 'Accept: application/json' \
-                          --header "Authorization: FortifyToken $fortify_unified_login_token" \
-                          "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/issues?qm=issues&q=$filtro_url_encoded")
-                      exit_code_curl=$?
-                      if [ $exit_code_curl -ne 0 ]; then
-                          echo "❌ Erro ao consultar API SSC. Código: $exit_code_curl"
-                          exit 1
-                      fi
-                      num_issues=$(echo "$response" | jq '.count // 0')
-                      if [ "$num_issues" -gt 0 ]; then
-                          echo "❌ Gate falhou: $num_issues issues encontradas após o Gate."
-                          echo "📄 Verifique o relatório publicado."
-                          echo "🛑 Pipeline interrompida."
-                          exit 1
-                      else
-                          echo "✅ Gate aprovado: Nenhuma issue encontrada."
-                          echo "🟢 Pipeline liberada."
-                      fi
-                  fi
-                  
+                                      # Verifica o código de resposta
+                    fortify_verificar_codigo_de_resposta
+                    
+                    # Extrai o job token da saída usando grep e regex
+                    fortify_job_token=$(echo "$output" | grep "Submitted job and received token" | grep -E -o "[a-f0-9-]{36}")
+                    
+                    # Verifica se o job token foi encontrado
+                    if [ -z "$fortify_job_token" ]; then
+                        echo "❌ Job token não foi criado."
+                        exit 1
+                    else
+                        echo "✅ Arquivos para scan enviados com sucesso. ID do Scan: $fortify_job_token"
+                    fi
+                    
+                    cat <<'EOF'
+                      ____            _  __   ___        ____                      _  __          _____       __       
+                     / __/___   ____ (_)/ /_ / _/__ __  / __/___  ____ __ __ ____ (_)/ /_ __ __  / ___/___ _ / /_ ___  
+                    /_/ // _ \ / __// // __// _// // / _\ \ / -_)/ __// // // __// // __// // / / (_ // _ `// __// -_) 
+                    \__/ \___//_/  /_/ \__//_/  \_, / /___/ \__/ \__/ \_,_//_/  /_/ \__/ \_, /  \___/ \_,_/ \__/ \__/  
+                                               /___/                               /___/                                
+                    EOF
+                    
+                    echo "⚙️ Processando regras para projeto $fortify_project..."
+                    
+                    regras_json='[
+                      {
+                        "gate": "audited:false [fortify priority order]:critical [fortify priority order]:high",
+                        "name": "default",
+                        "bypass": "false"
+                      },
+                      {
+                        "gate": "audited:false [fortify priority order]:critical [fortify priority order]:high",
+                        "name": "teste",
+                        "bypass": "true"
+                      }
+                    ]'
+
+                    # Regra default
+                    gate=$(echo $regras_json | jq --compact-output --raw-output '.[] | select(.name=="default") | .gate')
+                    if [ "$gate" == "" ]; then
+                        echo LEVEL=ERRO MESSAGE="Não há regra default definida para o projeto no Fortify"
+                        exit 1
+                    fi
+                    bypass=$(echo $regras_json | jq --compact-output --raw-output '.[] | select(.name=="default") | .bypass')
+                    
+                    filtro_aplicado=$gate
+                    
+                    # Se o gate estiver habilitado, consultar o número de findings que atendem os critérios
+                    if [ "$bypass" == "true" ]; then
+                        echo "[ OK ] Bypass habilitado para esta regra. O gate não será aplicado."
+                    	echo '    ______              __   _  ____          ______        __           ____                                    __  '
+                    	echo '   / ____/____   _____ / /_ (_)/ __/__  __   / ____/____ _ / /_ ___     / __ ) __  __ ____   ____ _ _____ _____ / /  '
+                    	echo '  / /_   / __ \ / ___// __// // /_ / / / /  / / __ / __ `// __// _ \   / __  |/ / / // __ \ / __ `// ___// ___// /   '
+                    	echo ' / __/  / /_/ // /   / /_ / // __// /_/ /  / /_/ // /_/ // /_ /  __/  / /_/ // /_/ // /_/ // /_/ /(__  )(__  )/_/    '
+                    	echo '/_/     \____//_/    \__//_//_/   \__, /   \____/ \__,_/ \__/ \___/  /_____/ \__, // .___/ \__,_//____//____/(_)     '
+                    	echo '                                 /____/                                     /____//_/                                '
+                    else
+                        echo "Bypass desabilitado para esta regra. O gate será aplicado."
+                        echo "Filtro aplicado: $filtro_aplicado"
+                        filtro_url_encoded=$(echo "$filtro_aplicado" | jq -sRr '@uri')
+                        echo "Consultando vulnerabilidades no SSC..."
+                        response=$(curl -sS -k -X GET --header 'Content-Type: application/json' \
+                            --header 'Accept: application/json' \
+                            --header "Authorization: FortifyToken $fortify_unified_login_token" \
+                            "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/issues?qm=issues&q=$filtro_url_encoded")
+                        exit_code=$?
+                        fortify_verificar_resposta_api
+                        num_issues=$(echo $response | jq '.count')
+                        
+                        if [ $num_issues -gt 0 ]; then
+                            echo LEVEL=ERROR MESSAGE="Gate falhou: $num_issues issues retornadas pelo filtro. Verifique o relatório publicado nos artefatos."
+                    		echo -e '\033[31m    ______              __   _  ____          ______        __           _  __\033[0m'
+                    		echo -e '\033[31m   / ____/____   _____ / /_ (_)/ __/__  __   / ____/____ _ / /_ ___     | |/ /\033[0m'
+                    		echo -e '\033[31m  / /_   / __ \ / ___// __// // /_ / / / /  / / __ / __ `// __// _ \    |   / \033[0m'
+                    		echo -e '\033[31m / __/  / /_/ // /   / /_ / // __// /_/ /  / /_/ // /_/ // /_ /  __/   /   |  \033[0m'
+                    		echo -e '\033[31m/_/     \____//_/    \__//_//_/   \__, /   \____/ \__,_/ \__/ \___/   /_/|_|  \033[0m'
+                    		echo -e '\033[31m                                 /____/                                       \033[0m'
+                            exit 1
+                        else
+                            echo "[ OK ] Gate passado com sucesso. Continuação do build liberada."
+                            echo -e '\033[32m    ______              __   _  ____          ______        __                 __  \033[0m'
+                    		echo -e '\033[32m   / ____/____   _____ / /_ (_)/ __/__  __   / ____/____ _ / /_ ___           / /  \033[0m'
+                    		echo -e '\033[32m  / /_   / __ \ / ___// __// // /_ / / / /  / / __ / __ `// __// _ \   _     / /   \033[0m'
+                    		echo -e '\033[32m / __/  / /_/ // /   / /_ / // __// /_/ /  / /_/ // /_/ // /_ /  __/   \ \__/ /    \033[0m'
+                    		echo -e '\033[32m/_/     \____//_/    \__//_//_/   \__, /   \____/ \__,_/ \__/ \___/     \____/     \033[0m'
+                    		echo -e '\033[32m                                 /____/                                            \033[0m'
+                        fi
+                    fi

@@ -186,7 +186,7 @@ jobs:
         fortify_configurar_projeto
         fortify_regras_processamento
         
-        echo "Executando Scancentral Client v$fortify_version:
+        echo "Executando Scancentral Client 
         $fortify_scancentral_tool -ssctoken $fortify_controller_token -url $fortify_controller_url \
           start $fortify_translate_name \
           -application $fortify_project_name -version $fortify_version_name \

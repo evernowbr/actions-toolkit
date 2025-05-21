@@ -226,7 +226,7 @@ jobs:
         	if [ "$response_code" == "409" ];
         	then
         		fortify_message=$(echo "$response" | jq '.message' | sed 's/"//g')
-        		echo "⚠️Status da execução do job: Job ainda não localizado no SSC ($fortify_message)"
+        		echo "⚠️ Status da execução do job: Job ainda não localizado no SSC ($fortify_message)"
         		((fortify_not_found_time++))
         		if [ "$fortify_not_found_time" -ge "$fortify_max_not_found_time" ]; then
                     echo "❌ Excedido o tempo limite para localização do job no SSC."
@@ -247,7 +247,7 @@ jobs:
         				((fortify_pending_time++))
         				if [ "$fortify_pending_time" -ge "$fortify_max_pending_time" ]; then
         					#echo "❌ Excedido o tempo limite para espera na fila de scan do Fortify."
-                            echo "❌Excedido o tempo limite para espera na fila de scan do Fortify."
+                            echo "❌ Excedido o tempo limite para espera na fila de scan do Fortify."
         					exit 1
         				fi
         			;;
@@ -255,7 +255,7 @@ jobs:
         				((fortify_scan_time++))
         				if [ "$fortify_scan_time" -ge "$fortify_max_scan_time" ]; then
         					#echo "❌ Excedido o tempo limite para espera na fila de scan do Fortify."
-                            echo "❌Excedido o tempo limite para espera na fila de scan do Fortify."
+                            echo "❌ Excedido o tempo limite para espera na fila de scan do Fortify."
         					exit 1
         				fi
         			;;
@@ -264,7 +264,7 @@ jobs:
         				break
         			;;
         			*)
-        				echo "❌O job $fortify_job_token retornou o estado $job_state."
+        				echo "❌ O job $fortify_job_token retornou o estado $job_state."
         				exit 1
         			;;
         		esac
@@ -331,7 +331,7 @@ jobs:
             num_issues=$(echo $response | jq '.count')
             
             if [ $num_issues -gt 0 ]; then
-                echo ❌"Gate falhou: $num_issues issues retornadas pelo filtro. Verifique o relatório publicado nos artefatos."
+                echo "❌ Gate falhou: $num_issues issues retornadas pelo filtro. Verifique o relatório publicado nos artefatos."
                 echo -e '\033[31m   ____            _  __   ___        ____                      _  __          _____       __         ___                 \033[0m'
                 echo -e '\033[31m  / __/___   ____ (_)/ /_ / _/__ __  / __/___  ____ __ __ ____ (_)/ /_ __ __  / ___/___ _ / /_ ___   / _ \ ___ _ ___  ___ \033[0m'
                 echo -e '\033[31m / _/ / _ \ / __// // __// _// // / _\ \ / -_)/ __// // // __// // __// // / / (_ // _ `// __// -_) / ___// _ `/(_-< (_-< \033[0m'

@@ -217,87 +217,87 @@ jobs:
         fi
         
         echo "🔍 Monitorando execução do job $fortify_job_token..."
-        
-        while true
-        do
-        	response=$(curl -s -k -X GET --header "Content-Type: application/json" --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/cloudjobs/$fortify_job_token")
-        	response_code=$(echo "$response" | jq '.responseCode')
-        
-        	# O job foi enviado, mas ainda não está disponível na API do SSC
-        	if [ "$response_code" == "409" ];
-        	then
-        		fortify_message=$(echo "$response" | jq '.message' | sed 's/"//g')
-        		echo "⚠️ Status da execução do job: Job ainda não localizado no SSC ($fortify_message)"
-        		((fortify_not_found_time++))
-        		if [ "$fortify_not_found_time" -ge "$fortify_max_not_found_time" ]; then
+
+        while true; do
+            response=$(curl -s -k -X GET \
+                --header "Content-Type: application/json" \
+                --header "Accept: application/json" \
+                --header "Authorization: FortifyToken $fortify_unified_login_token" \
+                "$fortify_ssc_api_url/cloudjobs/$fortify_job_token")
+
+            response_code=$(echo "$response" | jq -r '.responseCode // empty')
+
+            # Job ainda não está disponível na API do SSC
+            if [ "$response_code" == "409" ]; then
+                fortify_message=$(echo "$response" | jq -r '.message // "Sem mensagem"')
+                echo "⚠️ Status da execução do job: Job ainda não localizado no SSC ($fortify_message)"
+                ((fortify_not_found_time++))
+
+                if [ "$fortify_not_found_time" -ge "$fortify_max_not_found_time" ]; then
                     echo "❌ Excedido o tempo limite para localização do job no SSC."
-        			exit 1
-        		fi
-        	fi
-        
-        	# O job já pode ser localizado na API do SSC
-        	if [ "$response_code" == "200" ];
-        	then
-        		job_state=$(echo "$response" | jq '.data | (.jobState)' | sed 's/"//g')
-        		echo "📊 Status da execução do job: $job_state"
-        		case "$job_state" in
-        			UPLOAD_QUEUED)
-        				# Nada a fazer
-        			;;
-        			PENDING)
-        				((fortify_pending_time++))
-        				if [ "$fortify_pending_time" -ge "$fortify_max_pending_time" ]; then
-        					#echo "❌ Excedido o tempo limite para espera na fila de scan do Fortify."
+                    exit 1
+                fi
+
+            elif [ "$response_code" == "200" ]; then
+                job_state=$(echo "$response" | jq -r '.data.jobState // "UNKNOWN"')
+                echo "📊 Status da execução do job: $job_state"
+
+                case "$job_state" in
+                    UPLOAD_QUEUED)
+                        # Aguardando upload
+                        ;;
+                    PENDING)
+                        ((fortify_pending_time++))
+                        if [ "$fortify_pending_time" -ge "$fortify_max_pending_time" ]; then
                             echo "❌ Excedido o tempo limite para espera na fila de scan do Fortify."
-        					exit 1
-        				fi
-        			;;
-        			SCAN_RUNNING)
-        				((fortify_scan_time++))
-        				if [ "$fortify_scan_time" -ge "$fortify_max_scan_time" ]; then
-        					#echo "❌ Excedido o tempo limite para espera na fila de scan do Fortify."
-                            echo "❌ Excedido o tempo limite para espera na fila de scan do Fortify."
-        					exit 1
-        				fi
-        			;;
-        			UPLOAD_COMPLETED)
-        				echo "✅ Job $fortify_job_token executado e armazenado com sucesso."
-        				break
-        			;;
-        			*)
-        				echo "❌ O job $fortify_job_token retornou o estado $job_state."
-        				exit 1
-        			;;
-        		esac
-        	fi
-        
-        	if [ "$response_code" == "" ];
-        	then
-        		echo "⚠️ Código de resposta não definido."
-        	fi
-        
-        	if [ "$response_code" != "" ] && [ "$response_code" != "409" ] && [ "$response_code" != "200" ];
-        	then
-        		fortify_message=$(echo "$response" | jq '.message' | sed 's/"//g')
-        		echo "❌ O Fortify SSC retornou o código $response_code: $fortify_message"
-        		exit 1
-        	fi
-        
-        	sleep $fortify_polling_delay
-        	((fortify_total_time++))
-        	if [ "$fortify_total_time" -ge "$fortify_max_total_time" ]; then
+                            exit 1
+                        fi
+                        ;;
+                    SCAN_RUNNING)
+                        ((fortify_scan_time++))
+                        if [ "$fortify_scan_time" -ge "$fortify_max_scan_time" ]; then
+                            echo "❌ Excedido o tempo limite de execução do scan do Fortify."
+                            exit 1
+                        fi
+                        ;;
+                    UPLOAD_COMPLETED)
+                        echo "✅ Job $fortify_job_token executado e armazenado com sucesso."
+                        break
+                        ;;
+                    *)
+                        echo "❌ O job $fortify_job_token retornou o estado inesperado: $job_state"
+                        exit 1
+                        ;;
+                esac
+
+            elif [ -z "$response_code" ]; then
+                echo "⚠️ Código de resposta não definido."
+
+            else
+                fortify_message=$(echo "$response" | jq -r '.message // "Erro desconhecido"')
+                echo "❌ O Fortify SSC retornou o código $response_code: $fortify_message"
+                exit 1
+            fi
+
+            sleep "$fortify_polling_delay"
+            ((fortify_total_time++))
+
+            if [ "$fortify_total_time" -ge "$fortify_max_total_time" ]; then
                 echo "❌ Excedido o tempo limite total para execução do job no Fortify."
-        		exit 1
-        	fi
+                exit 1
+            fi
         done
-        
-        echo '   ____            _  __   ___        ____                      _  __          _____       __       '
-        echo '  / __/___   ____ (_)/ /_ / _/__ __  / __/___  ____ __ __ ____ (_)/ /_ __ __  / ___/___ _ / /_ ___  '
-        echo ' / _/ / _ \ / __// // __// _// // / _\ \ / -_)/ __// // // __// // __// // / / (_ // _ `// __// -_) '
-        echo '/_/   \___//_/  /_/ \__//_/  \_, / /___/ \__/ \__/ \_,_//_/  /_/ \__/ \_, /  \___/ \_,_/ \__/ \__/  '
-        echo '                            /___/                                    /___/                          '
-        
-        echo "⚙️ Processando regras para projeto $fortify_project_name..."
+
+        cat <<'EOF'
+          ____            _  __   ___        ____                      _  __          _____       __       
+          / __/___   ____ (_)/ /_ / _/__ __  / __/___  ____ __ __ ____ (_)/ /_ __ __  / ___/___ _ / /_ ___  
+        / _/ / _ \ / __// // __// _// // / _\ \ / -_)/ __// // // __// // __// // / / (_ // _ `// __// -_) 
+        /_/   \___//_/  /_/ \__//_/  \_, / /___/ \__/ \__/ \_,_//_/  /_/ \__/ \_, /  \___/ \_,_/ \__/ \__/  
+                                    /___/                                    /___/                          
+        EOF
+
+        echo "⚙️ Processando regras para projeto $fortify_project..."
+
         regras_json=$(cat ./fortify-regras-gate.json)
         
         # Regra default

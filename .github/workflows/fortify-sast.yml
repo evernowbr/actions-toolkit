@@ -157,14 +157,14 @@ jobs:
                   fortify_verificar_codigo_de_resposta
                   
                   # Extrai o job token da saída usando grep e regex
-                  fortify_job_token=$(echo "$output" | grep "Submitted job and received token" | grep -E -o "[a-f0-9-]{36}")
+                  fortify_job_token=$(echo "$output" | grep "Submitted job and received token" | grep  -o "[a-f0-9-]{36}")
                   
                   # Verifica se o job token foi encontrado
                   if [ -z "$fortify_job_token" ]; then
                       echo "❌ Job token não foi criado."
                       exit 1
                   else
-                      echo "✅ Arquivos para scan enviados com sucesso. ID do Scan: $fortify_job_token"
+                      echo "📦 Arquivos para scan enviados com sucesso. Jobtoken: $fortify_job_token"
                   fi
                   
                   cat <<'EOF'
@@ -202,15 +202,10 @@ jobs:
           
                   # Se o gate estiver habilitado, consultar o número de findings que atendem os critérios
                   if [ "$bypass" == "true" ]; then
-                      echo "✅ Bypass habilitado para esta regra. O gate não será aplicado."
-                      echo '   ____            _  __   ___        ____                      _  __          _____       __       '
-                      echo '  / __/___   ____ (_)/ /_ / _/__ __  / __/___  ____ __ __ ____ (_)/ /_ __ __  / ___/___ _ / /_ ___  '
-                      echo ' / _/ / _ \ / __// // __// _// // / _\ \ / -_)/ __// // // __// // __// // / / (_ // _ `// __// -_) '
-                      echo '/_/   \___//_/  /_/ \__//_/  \_, / /___/ \__/ \__/ \_,_//_/  /_/ \__/ \_, /  \___/ \_,_/ \__/ \__/  '
-                      echo '                            /___/                                    /___/                          '   
+                      echo "✅ Bypass desabilitado para esta regra. O gate não será aplicado." 
                   else
-                      echo "✅ Bypass desabilitado para esta regra. O gate será aplicado."
-                      echo "✅ Filtro aplicado: $filtro_aplicado"
+                      echo "✅ Bypass habilitado para esta regra. O gate será aplicado."
+                      echo "🔍 Filtro aplicado: $filtro_aplicado"
                       filtro_url_encoded=$(echo "$filtro_aplicado" | jq -sRr '@uri')
                       echo "🔍 Consultando vulnerabilidades no SSC..."
                       response=$(curl -sS -k -X GET --header 'Content-Type: application/json' \
@@ -221,20 +216,13 @@ jobs:
                       fortify_verificar_resposta_api
                       num_issues=$(echo $response | jq '.count')
                       
-                      if [ $num_issues -gt 0 ]; then
-                          echo "❌ Gate falhou: $num_issues issues retornadas pelo filtro. Verifique o relatório publicado nos artefatos."
-                          echo -e '\033[31m   ____            _  __   ___        ____                      _  __          _____       __         ___                 \033[0m'
-                          echo -e '\033[31m  / __/___   ____ (_)/ /_ / _/__ __  / __/___  ____ __ __ ____ (_)/ /_ __ __  / ___/___ _ / /_ ___   / _ \ ___ _ ___  ___ \033[0m'
-                          echo -e '\033[31m / _/ / _ \ / __// // __// _// // / _\ \ / -_)/ __// // // __// // __// // / / (_ // _ `// __// -_) / ___// _ `/(_-< (_-< \033[0m'
-                          echo -e '\033[31m/_/   \___//_/  /_/ \__//_/  \_, / /___/ \__/ \__/ \_,_//_/  /_/ \__/ \_, /  \___/ \_,_/ \__/ \__/ /_/    \_,_//___//___/ \033[0m'
-                          echo -e '\033[31m                            /___/                                    /___/                                                \033[0m'
+                      if [ "$num_issues" -gt 0 ]; then
+                          echo "❌ Gate falhou: $num_issues issues encontradas após o Gate."
+                          echo "📄 Verifique o relatório publicado."
+                          echo "🛑 Pipeline interrompida."
                           exit 1
                       else
-                          echo "✅ Gate passado com sucesso. Continuação do build liberada."
-                          echo -e '\033[32m  ____            _  __   ___        ____                      _  __          _____       __         ____       _  __ \033[0m'
-                          echo -e '\033[32m  / __/___   ____ (_)/ /_ / _/__ __  / __/___  ____ __ __ ____ (_)/ /_ __ __  / ___/___ _ / /_ ___   / __/___ _ (_)/ /\033[0m'
-                          echo -e '\033[32m / _/ / _ \ / __// // __// _// // / _\ \ / -_)/ __// // // __// // __// // / / (_ // _ `// __// -_) / _/ / _ `// // / \033[0m' 
-                          echo -e '\033[32m/_/   \___//_/  /_/ \__//_/  \_, / /___/ \__/ \__/ \_,_//_/  /_/ \__/ \_, /  \___/ \_,_/ \__/ \__/ /_/   \_,_//_//_/  \033[0m'  
-                          echo -e '\033[32m                            /___/                                    /___/                                            \033[0m'
+                          echo "✅ Gate aprovado: Nenhuma issue encontrada."
+                          echo "🟢 Pipeline liberada."
                       fi
                   fi

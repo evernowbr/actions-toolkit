@@ -1,11 +1,10 @@
 name: Fortify SAST
 
 on:
-    repository_dispatch:
-        types: [fortify_event]
+    # repository_dispatch:
+    #     types: [fortify_event]
     workflow_call:
         inputs:
-            # inputs fortify scan
             name:
                 required: true
                 type: string
@@ -172,85 +171,85 @@ jobs:
                         echo "✅ Arquivos para scan enviados com sucesso. ID do Scan: $fortify_job_token"
                     fi
                     
-                    # echo "⚙️ Iniciando processamento das regras de gate para o projeto."
+                    echo "⚙️ Iniciando processamento das regras de gate para o projeto."
                     
-                    # regras_json='[
-                    #   {
-                    #     "gate": "audited:false [fortify priority order]:critical [fortify priority order]:high",
-                    #     "name": "default",
-                    #     "bypass": "false"
-                    #   },
-                    #   {
-                    #     "gate": "audited:false [fortify priority order]:critical [fortify priority order]:high",
-                    #     "name": "teste",
-                    #     "bypass": "true"
-                    #   }
-                    # ]'
+                    regras_json='[
+                      {
+                        "gate": "audited:false [fortify priority order]:critical [fortify priority order]:high",
+                        "name": "default",
+                        "bypass": "false"
+                      },
+                      {
+                        "gate": "audited:false [fortify priority order]:critical [fortify priority order]:high",
+                        "name": "teste",
+                        "bypass": "true"
+                      }
+                    ]'
                     
-                    # # Obtém regra default
-                    # gate=$(echo "$regras_json" | jq --compact-output --raw-output '.[] | select(.name=="default") | .gate')
-                    # if [ -z "$gate" ]; then
-                    #     echo "❌ Nenhuma regra 'default' foi definida para o projeto no Fortify."
-                    #     exit 1
-                    # fi
+                    # Obtém regra default
+                    gate=$(echo "$regras_json" | jq --compact-output --raw-output '.[] | select(.name=="default") | .gate')
+                    if [ -z "$gate" ]; then
+                        echo "❌ Nenhuma regra 'default' foi definida para o projeto no Fortify."
+                        exit 1
+                    fi
                     
-                    # bypass=$(echo "$regras_json" | jq --compact-output --raw-output '.[] | select(.name=="default") | .bypass')
-                    # filtro_aplicado="$gate"
+                    bypass=$(echo "$regras_json" | jq --compact-output --raw-output '.[] | select(.name=="default") | .bypass')
+                    filtro_aplicado="$gate"
                     
-                    # # Verifica se a regra será aplicada ou ignorada (bypass)
-                    # if [ "$bypass" == "true" ]; then
-                    #     echo "⚠️  Bypass ativado: a regra 'default' não será aplicada."
-                    #     echo "✅ Continuação do pipeline permitida."
-                    # else
-                    #     echo "🔒 Bypass desativado: a regra 'default' será aplicada."
-                    #     echo "🔍 Filtro aplicado: \`$filtro_aplicado\`"
-                    #     filtro_url_encoded=$(echo "$filtro_aplicado" | jq -sRr '@uri')
-                    #     echo "📡 Consultando vulnerabilidades no Fortify SSC..."
+                    # Verifica se a regra será aplicada ou ignorada (bypass)
+                    if [ "$bypass" == "true" ]; then
+                        echo "⚠️  Bypass ativado: a regra 'default' não será aplicada."
+                        echo "✅ Continuação do pipeline permitida."
+                    else
+                        echo "🔒 Bypass desativado: a regra 'default' será aplicada."
+                        echo "🔍 Filtro aplicado: \`$filtro_aplicado\`"
+                        filtro_url_encoded=$(echo "$filtro_aplicado" | jq -sRr '@uri')
+                        echo "📡 Consultando vulnerabilidades no Fortify SSC..."
                     
-                    #     response=$(curl -sS -k -X GET --header 'Content-Type: application/json' \
-                    #         --header 'Accept: application/json' \
-                    #         --header "Authorization: FortifyToken $fortify_unified_login_token" \
-                    #         "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/issues?qm=issues&q=$filtro_url_encoded")
-                    #     exit_code=$?
+                        response=$(curl -sS -k -X GET --header 'Content-Type: application/json' \
+                            --header 'Accept: application/json' \
+                            --header "Authorization: FortifyToken $fortify_unified_login_token" \
+                            "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/issues?qm=issues&q=$filtro_url_encoded")
+                        exit_code=$?
                     
-                    #     fortify_verificar_resposta_api
+                        fortify_verificar_resposta_api
                     
-                    #     num_issues=$(echo "$response" | jq '.count')
+                        num_issues=$(echo "$response" | jq '.count')
                     
-                    #     if [ "$num_issues" -gt 0 ]; then
-                    #         echo "❌ Gate falhou: **$num_issues** vulnerabilidades encontradas com base no filtro aplicado."
-                    #         echo "📄 Verifique o relatório publicado para mais detalhes."
-                    #         echo '  _____       __         ____       _  __ '
-                    #         echo ' / ___/___ _ / /_ ___   / __/___ _ (_)/ / '
-                    #         echo '/ (_ // _ `// __// -_) / _/ / _ `// // /  '
-                    #         echo '\___/ \_,_/ \__/ \__/ /_/   \_,_//_//_/   '
-                    #         exit 1
-                    #     else
-                    #         echo "✅ Gate aprovado: Nenhuma vulnerabilidade crítica ou alta encontrada."
-                    #         echo "🚀 Continuação do build autorizada."
-                    #         echo '  _____       __         ___                 '
-                    #         echo ' / ___/___ _ / /_ ___   / _ \ ___ _ ___  ___ '
-                    #         echo '/ (_ // _ `// __// -_) / ___// _ `/(_-< (_-< '
-                    #         echo '\___/ \_,_/ \__/ \__/ /_/    \_,_//___//___/ '
-                    #     fi
-                    # fi
-    process-webhook:
-        runs-on: self-hosted
-        name: Fortify Webhook SAST
-        if: github.event_name == 'repository_dispatch'
-        steps:
-          - name: Exibir Payload Completo (Formatado)
-            run: |
-              echo "✅ Payload Recebido:"
-              echo '${{ toJson(github.event.client_payload) }}' | jq
+                        if [ "$num_issues" -gt 0 ]; then
+                            echo "❌ Gate falhou: **$num_issues** vulnerabilidades encontradas com base no filtro aplicado."
+                            echo "📄 Verifique o relatório publicado para mais detalhes."
+                            echo '  _____       __         ____       _  __ '
+                            echo ' / ___/___ _ / /_ ___   / __/___ _ (_)/ / '
+                            echo '/ (_ // _ `// __// -_) / _/ / _ `// // /  '
+                            echo '\___/ \_,_/ \__/ \__/ /_/   \_,_//_//_/   '
+                            exit 1
+                        else
+                            echo "✅ Gate aprovado: Nenhuma vulnerabilidade crítica ou alta encontrada."
+                            echo "🚀 Continuação do build autorizada."
+                            echo '  _____       __         ___                 '
+                            echo ' / ___/___ _ / /_ ___   / _ \ ___ _ ___  ___ '
+                            echo '/ (_ // _ `// __// -_) / ___// _ `/(_-< (_-< '
+                            echo '\___/ \_,_/ \__/ \__/ /_/    \_,_//___//___/ '
+                        fi
+                    fi
+    # process-webhook:
+    #     runs-on: self-hosted
+    #     name: Fortify Webhook SAST
+    #     if: github.event_name == 'repository_dispatch'
+    #     steps:
+    #       - name: Exibir Payload Completo (Formatado)
+    #         run: |
+    #           echo "✅ Payload Recebido:"
+    #           echo '${{ toJson(github.event.client_payload) }}' | jq
 
-          - name: Exibir Dados Individuais
-            run: |
-              echo "🚀 Webhook do Fortify recebido!"
-              echo "📦 Projeto: ${{ github.event.client_payload.projectName }} (ID: ${{ github.event.client_payload.projectId }})"
-              echo "🔄 Versão: ${{ github.event.client_payload.projectVersionName }} (ID: ${{ github.event.client_payload.projectVersionId }})"
-              echo "🛠️ Evento: ${{ github.event.client_payload.events[0].event }}"
-              echo "📂 Arquivo: ${{ github.event.client_payload.events[0].filename }}"
-              echo "📅 Data do Evento: ${{ github.event.client_payload.triggeredAt }}"
-              echo "🔗 Fortify SSC URL: ${{ github.event.client_payload.sscUrl }}"
-              echo "🆔 Webhook ID: ${{ github.event.client_payload.webHookId }}"
+    #       - name: Exibir Dados Individuais
+    #         run: |
+    #           echo "🚀 Webhook do Fortify recebido!"
+    #           echo "📦 Projeto: ${{ github.event.client_payload.projectName }} (ID: ${{ github.event.client_payload.projectId }})"
+    #           echo "🔄 Versão: ${{ github.event.client_payload.projectVersionName }} (ID: ${{ github.event.client_payload.projectVersionId }})"
+    #           echo "🛠️ Evento: ${{ github.event.client_payload.events[0].event }}"
+    #           echo "📂 Arquivo: ${{ github.event.client_payload.events[0].filename }}"
+    #           echo "📅 Data do Evento: ${{ github.event.client_payload.triggeredAt }}"
+    #           echo "🔗 Fortify SSC URL: ${{ github.event.client_payload.sscUrl }}"
+    #           echo "🆔 Webhook ID: ${{ github.event.client_payload.webHookId }}"

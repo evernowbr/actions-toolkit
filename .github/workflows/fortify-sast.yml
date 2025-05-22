@@ -21,34 +21,6 @@ on:
             fortify_translate_additional_flags:
                 required: true
                 type: string
-            # inputs process-webhook
-            projectName:
-              required: true
-              type: string
-            projectId:
-              required: true
-              type: string
-            projectVersionName:
-              required: true
-              type: string
-            projectVersionId:
-              required: true
-              type: string
-            event:
-              required: true
-              type: string
-            filename:
-              required: true
-              type: string
-            triggeredAt:
-              required: true
-              type: string
-            sscUrl:
-              required: true
-              type: string
-            webHookId:
-              required: true
-              type: string
         secrets:
             FORTIFY_SSC_API_URL:
                 required: true

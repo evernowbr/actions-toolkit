@@ -1,25 +1,47 @@
 name: fortify-webhook-service
 
 on:
-  repository_dispatch:
-    types: [fortify_event]
+  workflow_call:
+    inputs:
+      projectName:
+        required: true
+        type: string
+      projectId:
+        required: true
+        type: string
+      projectVersionName:
+        required: true
+        type: string
+      projectVersionId:
+        required: true
+        type: string
+      event:
+        required: true
+        type: string
+      filename:
+        required: true
+        type: string
+      triggeredAt:
+        required: true
+        type: string
+      sscUrl:
+        required: true
+        type: string
+      webHookId:
+        required: true
+        type: string
 
 jobs:
   process_webhook:
     runs-on: ubuntu-latest
     steps:
-      - name: Exibir Payload Completo (Formatado)
-        run: |
-          echo "✅ Payload Recebido:"
-          echo '${{ toJson(github.event.client_payload) }}' | jq
-
-      - name: Exibir Dados Individuais
+      - name: Exibir Dados Recebidos do Fortify
         run: |
           echo "🚀 Webhook do Fortify recebido!"
-          echo "📦 Projeto: ${{ github.event.client_payload.projectName }} (ID: ${{ github.event.client_payload.projectId }})"
-          echo "🔄 Versão: ${{ github.event.client_payload.projectVersionName }} (ID: ${{ github.event.client_payload.projectVersionId }})"
-          echo "🛠️ Evento: ${{ github.event.client_payload.events[0].event }}"
-          echo "📂 Arquivo: ${{ github.event.client_payload.events[0].filename }}"
-          echo "📅 Data do Evento: ${{ github.event.client_payload.triggeredAt }}"
-          echo "🔗 Fortify SSC URL: ${{ github.event.client_payload.sscUrl }}"
-          echo "🆔 Webhook ID: ${{ github.event.client_payload.webHookId }}"
+          echo "📦 Projeto: ${{ inputs.projectName }} (ID: ${{ inputs.projectId }})"
+          echo "🔄 Versão: ${{ inputs.projectVersionName }} (ID: ${{ inputs.projectVersionId }})"
+          echo "🛠️ Evento: ${{ inputs.event }}"
+          echo "📂 Arquivo: ${{ inputs.filename }}"
+          echo "📅 Data do Evento: ${{ inputs.triggeredAt }}"
+          echo "🔗 Fortify SSC URL: ${{ inputs.sscUrl }}"
+          echo "🆔 Webhook ID: ${{ inputs.webHookId }}"

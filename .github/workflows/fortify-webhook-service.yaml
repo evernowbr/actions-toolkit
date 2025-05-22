@@ -1,4 +1,4 @@
-name: fortify-webhook-service
+name: Fortify Webhook Service
 
 on:
   workflow_call:

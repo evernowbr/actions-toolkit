@@ -1,0 +1,25 @@
+name: fortify-webhook-service
+
+on:
+  repository_dispatch:
+    types: [fortify_event]
+
+jobs:
+  process_webhook:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Exibir Payload Completo (Formatado)
+        run: |
+          echo "✅ Payload Recebido:"
+          echo '${{ toJson(github.event.client_payload) }}' | jq
+
+      - name: Exibir Dados Individuais
+        run: |
+          echo "🚀 Webhook do Fortify recebido!"
+          echo "📦 Projeto: ${{ github.event.client_payload.projectName }} (ID: ${{ github.event.client_payload.projectId }})"
+          echo "🔄 Versão: ${{ github.event.client_payload.projectVersionName }} (ID: ${{ github.event.client_payload.projectVersionId }})"
+          echo "🛠️ Evento: ${{ github.event.client_payload.events[0].event }}"
+          echo "📂 Arquivo: ${{ github.event.client_payload.events[0].filename }}"
+          echo "📅 Data do Evento: ${{ github.event.client_payload.triggeredAt }}"
+          echo "🔗 Fortify SSC URL: ${{ github.event.client_payload.sscUrl }}"
+          echo "🆔 Webhook ID: ${{ github.event.client_payload.webHookId }}"

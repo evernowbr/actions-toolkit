@@ -17,6 +17,7 @@ on:
 
 jobs:
   scan:
+    name: Dependency-Track Scan
     runs-on: self-hosted
 
     steps:

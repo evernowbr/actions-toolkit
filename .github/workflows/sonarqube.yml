@@ -1,0 +1,52 @@
+name: SonarQube Scan
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  sonar-scan:
+    name: SonarQube Analysis
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v3
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Create SonarQube project if not exists
+        run: |
+          PROJECT_KEY="${{ github.repository }}"
+          PROJECT_NAME="${{ github.event.repository.name }}"
+          SONAR_URL="${{ secrets.SONAR_HOST_URL }}"
+          TOKEN="${{ secrets.SONAR_TOKEN }}"
+
+          curl -s -u "$TOKEN:" "$SONAR_URL/api/projects/search?projects=$PROJECT_KEY" | grep "\"key\":\"$PROJECT_KEY\"" > /dev/null
+          if [ $? -ne 0 ]; then
+            echo "Creating project $PROJECT_KEY on SonarQube..."
+            curl -X POST -u "$TOKEN:" "$SONAR_URL/api/projects/create" \
+              -d "name=$PROJECT_NAME" \
+              -d "project=$PROJECT_KEY"
+          else
+            echo "Project already exists."
+          fi
+
+      - name: Cache Sonar packages
+        uses: actions/cache@v3
+        with:
+          path: ~/.sonar/cache
+          key: ${{ runner.os }}-sonar
+
+      - name: Run SonarQube scan (Maven)
+        run: |
+          mvn clean verify sonar:sonar \
+            -Dsonar.projectKey=${{ github.repository }} \
+            -Dsonar.host.url=${{ secrets.SONAR_HOST_URL }} \
+            -Dsonar.login=${{ secrets.SONAR_TOKEN }}

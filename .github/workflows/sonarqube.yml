@@ -1,10 +1,19 @@
 name: SonarQube Scan
 
 on:
-  push:
-    branches:
-      - main
-  pull_request:
+  workflow_call:
+    inputs:
+      PROJECT_KEY:
+        required: true
+        type: string
+      PROJECT_NAME:
+        required: true
+        type: string
+    secrets:
+      SONAR_HOST_URL:
+        required: true
+      SONAR_TOKEN:
+        required: true
 
 jobs:
   sonar-scan:
@@ -23,11 +32,12 @@ jobs:
 
       - name: Create SonarQube project if not exists
         run: |
-          PROJECT_KEY="${{ github.repository }}"
-          PROJECT_NAME="${{ github.event.repository.name }}"
+          PROJECT_KEY="${{ inputs.PROJECT_KEY }}"
+          PROJECT_NAME="${{ inputs.PROJECT_NAME }}"
           SONAR_URL="${{ secrets.SONAR_HOST_URL }}"
           TOKEN="${{ secrets.SONAR_TOKEN }}"
 
+          # Verifica se o projeto já existe no SonarQube
           curl -s -u "$TOKEN:" "$SONAR_URL/api/projects/search?projects=$PROJECT_KEY" | grep "\"key\":\"$PROJECT_KEY\"" > /dev/null
           if [ $? -ne 0 ]; then
             echo "Creating project $PROJECT_KEY on SonarQube..."
@@ -47,6 +57,6 @@ jobs:
       - name: Run SonarQube scan (Maven)
         run: |
           mvn clean verify sonar:sonar \
-            -Dsonar.projectKey=${{ github.repository }} \
+            -Dsonar.projectKey=${{ inputs.PROJECT_KEY }} \
             -Dsonar.host.url=${{ secrets.SONAR_HOST_URL }} \
             -Dsonar.login=${{ secrets.SONAR_TOKEN }}

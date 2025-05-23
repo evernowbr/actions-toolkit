@@ -33,6 +33,7 @@ on:
 
 jobs:
   process_webhook:
+    name: Fortify Webook Trigger
     runs-on: ubuntu-latest
     steps:
       - name: Exibir Payload Completo (Formatado)

@@ -20,7 +20,7 @@ on:
 
 jobs:
   sonar-scan:
-    name: SonarQube Analysis
+    name: SonarQube SCA Scan
     runs-on: ubuntu-latest
 
     steps:

@@ -35,20 +35,31 @@ jobs:
 
       - name: Create SonarQube project if not exists
         run: |
+          set -euo pipefail
+          
           PROJECT_KEY="${{ inputs.PROJECT_KEY }}"
           PROJECT_NAME="${{ inputs.PROJECT_NAME }}"
           SONAR_URL="${{ secrets.SONAR_HOST_URL }}"
           TOKEN="${{ secrets.SONAR_TOKEN }}"
 
-          # Verifica se o projeto já existe no SonarQube
-          curl -s -u "$TOKEN:" "$SONAR_URL/api/projects/search?projects=$PROJECT_KEY" | grep "\"key\":\"$PROJECT_KEY\"" > /dev/null
-          if [ $? -ne 0 ]; then
-            echo "Creating project $PROJECT_KEY on SonarQube..."
-            curl -X POST -u "$TOKEN:" "$SONAR_URL/api/projects/create" \
-              -d "name=$PROJECT_NAME" \
-              -d "project=$PROJECT_KEY"
+          echo "Verificando se o projeto $PROJECT_KEY já existe no SonarQube..."
+
+          response=$(curl -s -u "$TOKEN:" "$SONAR_URL/api/projects/search?projects=$PROJECT_KEY")
+
+          if echo "$response" | grep -q "\"key\":\"$PROJECT_KEY\""; then
+            echo "Projeto já existe no SonarQube."
           else
-            echo "Project already exists."
+            echo "Criando projeto $PROJECT_KEY no SonarQube..."
+            create_response=$(curl -s -o /dev/null -w "%{http_code}" -X POST -u "$TOKEN:" "$SONAR_URL/api/projects/create" \
+              -d "name=$PROJECT_NAME" \
+              -d "project=$PROJECT_KEY")
+
+            if [ "$create_response" -ne 200 ]; then
+              echo "Erro ao criar o projeto. Código HTTP: $create_response"
+              exit 1
+            fi
+
+            echo "Projeto criado com sucesso."
           fi
 
       - name: Cache Sonar packages
@@ -59,11 +70,12 @@ jobs:
 
       - name: Run SonarQube scan (Maven)
         run: |
+          set -euo pipefail
 
-          echo "Running scan on branch: $BRANCH_NAME"
-          
+          echo "Running scan on branch: ${{ inputs.BRANCH_NAME }}"
+
           mvn clean verify sonar:sonar \
             -Dsonar.projectKey=${{ inputs.PROJECT_KEY }} \
-            -Dsonar.branch.name=$BRANCH_NAME \
+            -Dsonar.branch.name=${{ inputs.BRANCH_NAME }} \
             -Dsonar.host.url=${{ secrets.SONAR_HOST_URL }} \
             -Dsonar.login=${{ secrets.SONAR_TOKEN }}

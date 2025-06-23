@@ -197,8 +197,8 @@ jobs:
                     
                     echo "| Total: $total_count (CRITICAL: $critical_count, HIGH: $high_count, MEDIUM: $medium_count, LOW: $low_count)"
                     echo "+----------------------------------------------------------+"
-                    echo "| CATEGORY                        | ISSUE ID   | SEVERITY | PRIMARY LOCATION                | RECOMMENDATIONS"
-                    echo "+---------------------------------+------------+----------+-------------------------------+-----------------------------------+"
+                    echo "| CATEGORY                                | ISSUE ID   | SEVERITY | PRIMARY LOCATION                        | RECOMMENDATIONS                          |"
+                    echo "+-----------------------------------------+------------+----------+-----------------------------------------+------------------------------------------+"
                     
                     # Mostra até 10 findings
                     cat /tmp/fortify_all_issues.json 2>/dev/null | jq -r '
@@ -209,10 +209,10 @@ jobs:
                             ((.fileName // .primaryLocation // .folderName // "Unknown File") + ":" + ((.lineNumber // "N/A")|tostring)),
                             (.subCategory // .category // .kingdom // "Security vulnerability")
                         ] | @tsv' | while IFS=$'\t' read -r category issue severity location recommendation; do
-                        printf "| %-31s | %-10s | %-8s | %-29s | %-33s |\n" \
-                            "${category:0:31}" "${issue:0:10}" "${severity:0:8}" "${location:0:29}" "${recommendation:0:33}"
+                        printf "| %-41s | %-10s | %-8s | %-39s | %-40s |\n" \
+                            "${category:0:41}" "${issue:0:10}" "${severity:0:8}" "${location:0:39}" "${recommendation:0:40}"
                     done
-                    echo "+---------------------------------+------------+----------+-------------------------------+-----------------------------------+"
+                    echo "+-----------------------------------------+------------+----------+-----------------------------------------+------------------------------------------+"
                     
                     echo "+----------------------------------------------------------+"
                     echo "|🔍 DETAILED BREAKDOWN BY CATEGORY:"
@@ -376,12 +376,6 @@ jobs:
                         fi
                     fi
 
-                    # Após o processamento do gate, SEMPRE gerar o relatório
-                    if fortify_extrair_estatisticas_completas; then
-                      gerar_relatorio_fortify
-                    else
-                      echo "⚠️ Não foi possível extrair dados de vulnerabilidades para gerar relatório detalhado."
-                    fi
     # process-webhook:
     #     runs-on: self-hosted
     #     name: Fortify Webhook SAST

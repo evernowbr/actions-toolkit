@@ -208,7 +208,7 @@ jobs:
                             (.friority // .priority // "Unknown"),
                             (.subCategory // .category // .kingdom // "Unknown"),
                             (.lineNumber // "N/A" | tostring),
-                            (.shortDescription // .category // "Security vulnerability")
+                            (.fullDescription // .abstract // .shortDescription // .category // "Security vulnerability")
                         ] | @tsv' | while IFS=$'\t' read -r file issue severity category line desc; do
                         printf "| %-22s | %-10s | %-8s | %-16s | %-4s | %-33s |\n" \
                             "${file:0:22}" "${issue:0:10}" "${severity:0:8}" "${category:0:16}" "${line:0:4}" "${desc:0:33}"

@@ -197,25 +197,25 @@ jobs:
                     
                     echo "| Total: $total_count (CRITICAL: $critical_count, HIGH: $high_count, MEDIUM: $medium_count, LOW: $low_count)"
                     echo "+----------------------------------------------------------+"
-                    echo "| FILE/COMPONENT         | ISSUE ID   | SEVERITY | CATEGORY         | LINE | DESCRIPTION"
-                    echo "+------------------------+------------+----------+------------------+------+-----------------------------------+"
+                    echo "| CATEGORY                        | ISSUE ID   | SEVERITY | PRIMARY LOCATION                | RECOMMENDATIONS"
+                    echo "+---------------------------------+------------+----------+-------------------------------+-----------------------------------+"
                     
                     # Mostra até 10 findings
                     cat /tmp/fortify_all_issues.json 2>/dev/null | jq -r '
                         .data | .[0:10] | .[] | [
-                            (.fileName // .primaryLocation // .folderName // "Unknown File"),
+                            (.subCategory // .category // .kingdom // "Unknown"),
                             (.issueInstanceId // (.id | tostring)),
                             (.friority // .priority // "Unknown"),
-                            (.subCategory // .category // .kingdom // "Unknown"),
-                            (.lineNumber // "N/A" | tostring),
-                            (.fullDescription // .abstract // .shortDescription // .category // "Security vulnerability")
-                        ] | @tsv' | while IFS=$'\t' read -r file issue severity category line desc; do
-                        printf "| %-22s | %-10s | %-8s | %-16s | %-4s | %-33s |\n" \
-                            "${file:0:22}" "${issue:0:10}" "${severity:0:8}" "${category:0:16}" "${line:0:4}" "${desc:0:33}"
+                            ((.fileName // .primaryLocation // .folderName // "Unknown File") + ":" + ((.lineNumber // "N/A")|tostring)),
+                            (.subCategory // .category // .kingdom // "Security vulnerability")
+                        ] | @tsv' | while IFS=$'\t' read -r category issue severity location recommendation; do
+                        printf "| %-31s | %-10s | %-8s | %-29s | %-33s |\n" \
+                            "${category:0:31}" "${issue:0:10}" "${severity:0:8}" "${location:0:29}" "${recommendation:0:33}"
                     done
-                    echo "+------------------------+------------+----------+------------------+------+-----------------------------------+"
+                    echo "+---------------------------------+------------+----------+-------------------------------+-----------------------------------+"
                     
-                    echo "| DETAILED BREAKDOWN BY CATEGORY:"
+                    echo "+----------------------------------------------------------+"
+                    echo "|🔍 DETAILED BREAKDOWN BY CATEGORY:"
                     echo "+------------------+----------+----------+----------+----------+----------+"
                     echo "| CATEGORY         | CRITICAL | HIGH     | MEDIUM   | LOW      | TOTAL    |"
                     echo "+------------------+----------+----------+----------+----------+----------+"
@@ -233,14 +233,19 @@ jobs:
                     done
                     echo "+------------------+----------+----------+----------+----------+----------+"
                     
-                    echo "| EXECUTIVE SUMMARY:"
-                    echo "+----------------------------------------------------------+"
-                    echo "| CRITICAL: $critical_count | HIGH: $high_count | MEDIUM: $medium_count | LOW: $low_count |"
-                    echo "| Total Issues Found: $total_count"
-                    # Mostra o link do SSC
+                    echo ""
+                    echo "+---------------------------------------------------------------------------------+"
+                    echo "|📊 EXECUTIVE SUMMARY:                                                           |"
+                    echo "+---------------------------------------------------------------------------------+"
+                    printf "| 🔴 CRITICAL: %-67s |\n" "$critical_count"
+                    printf "| 🟠 HIGH: %-71s |\n" "$high_count"
+                    printf "| 🟡 MEDIUM: %-69s |\n" "$medium_count"
+                    printf "| 🔵 LOW: %-72s |\n" "$low_count"
+                    echo "|                                                                                 |"
+                    printf "| 📊Total Issues Found: %-58s |\n" "$total_count"
                     ssc_base_url=$(echo "$fortify_ssc_api_url" | sed 's|/api/v1||g')
-                    echo "| Detailed Report: ${ssc_base_url}/html/ssc/version/${fortify_project_version_id}/fix"
-                    echo "+----------------------------------------------------------+"
+                    printf "| 🔗 Detailed Report: %-54s |\n" "${ssc_base_url}/html/ssc/version/${fortify_project_version_id}/fix"
+                    echo "+---------------------------------------------------------------------------------+"
                   }
 
                   # ========== EXECUÇÃO PRINCIPAL (MANTÉM O CÓDIGO ORIGINAL) ==========

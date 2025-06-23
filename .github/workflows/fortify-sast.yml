@@ -206,7 +206,7 @@ jobs:
                             (.fileName // .primaryLocation // .folderName // "Unknown File"),
                             (.issueInstanceId // (.id | tostring)),
                             (.friority // .priority // "Unknown"),
-                            (.category // .kingdom // "Unknown"),
+                            (.subCategory // .category // .kingdom // "Unknown"),
                             (.lineNumber // "N/A" | tostring),
                             (.shortDescription // .category // "Security vulnerability")
                         ] | @tsv' | while IFS=$'\t' read -r file issue severity category line desc; do
@@ -220,11 +220,11 @@ jobs:
                     echo "| CATEGORY         | CRITICAL | HIGH     | MEDIUM   | LOW      | TOTAL    |"
                     echo "+------------------+----------+----------+----------+----------+----------+"
                     cat /tmp/fortify_all_issues.json 2>/dev/null | jq -r '
-                        [.data[] | (.category // .kingdom // "Unknown")] | unique | .[]' | while read -r category; do
-                        cat_critical=$(cat /tmp/fortify_all_issues.json | jq --arg cat "$category" '[.data[] | select((.category // .kingdom // "Unknown") == $cat and (.friority // .priority) == "Critical")] | length')
-                        cat_high=$(cat /tmp/fortify_all_issues.json | jq --arg cat "$category" '[.data[] | select((.category // .kingdom // "Unknown") == $cat and (.friority // .priority) == "High")] | length')
-                        cat_medium=$(cat /tmp/fortify_all_issues.json | jq --arg cat "$category" '[.data[] | select((.category // .kingdom // "Unknown") == $cat and (.friority // .priority) == "Medium")] | length')
-                        cat_low=$(cat /tmp/fortify_all_issues.json | jq --arg cat "$category" '[.data[] | select((.category // .kingdom // "Unknown") == $cat and (.friority // .priority) == "Low")] | length')
+                        [.data[] | (.subCategory // .category // .kingdom // "Unknown")] | unique | .[]' | while read -r category; do
+                        cat_critical=$(cat /tmp/fortify_all_issues.json | jq --arg cat "$category" '[.data[] | select((.subCategory // .category // .kingdom // "Unknown") == $cat and (.friority // .priority) == "Critical")] | length')
+                        cat_high=$(cat /tmp/fortify_all_issues.json | jq --arg cat "$category" '[.data[] | select((.subCategory // .category // .kingdom // "Unknown") == $cat and (.friority // .priority) == "High")] | length')
+                        cat_medium=$(cat /tmp/fortify_all_issues.json | jq --arg cat "$category" '[.data[] | select((.subCategory // .category // .kingdom // "Unknown") == $cat and (.friority // .priority) == "Medium")] | length')
+                        cat_low=$(cat /tmp/fortify_all_issues.json | jq --arg cat "$category" '[.data[] | select((.subCategory // .category // .kingdom // "Unknown") == $cat and (.friority // .priority) == "Low")] | length')
                         cat_total=$((cat_critical + cat_high + cat_medium + cat_low))
                         if [ "$cat_total" -gt "0" ]; then
                             printf "| %-16s | %-8s | %-8s | %-8s | %-8s | %-8s |\n" \

@@ -130,6 +130,44 @@ jobs:
                   # - Compatível com diferentes versões da API (friority/priority)
                   # - Tratamento robusto de erros e valores ausentes
                   
+                  fortify_debug_estrutura_dados() {
+                      echo "🔍 DEBUG: Analisando estrutura dos dados retornados pela API..."
+                      
+                      # Salva um exemplo dos dados para análise
+                      if [ -f "/tmp/fortify_all_issues.json" ]; then
+                          echo "📄 Estrutura do primeiro item:"
+                          cat /tmp/fortify_all_issues.json | jq '.data[0] | keys' 2>/dev/null || echo "❌ Erro ao analisar estrutura"
+                          
+                          echo "📄 Campos de categoria disponíveis:"
+                          cat /tmp/fortify_all_issues.json | jq '.data[0] | {subCategory, category, kingdom, categoryName, subCategoryName, issueName}' 2>/dev/null || echo "❌ Erro ao analisar campos de categoria"
+                          
+                          echo "📄 Exemplo completo do primeiro item:"
+                          cat /tmp/fortify_all_issues.json | jq '.data[0]' 2>/dev/null || echo "❌ Erro ao analisar item completo"
+                      else
+                          echo "⚠️ Arquivo de dados não encontrado para debug"
+                      fi
+                  }
+                  
+                  fortify_extrair_categoria_correta() {
+                      # Função para extrair a categoria mais apropriada baseada na estrutura real dos dados
+                      local item="$1"
+                      
+                      # Tenta diferentes combinações de campos, priorizando os mais específicos
+                      local categoria=$(echo "$item" | jq -r '
+                          # Primeiro tenta campos mais específicos
+                          if .subCategoryName then .subCategoryName
+                          elif .categoryName then .categoryName
+                          elif .issueName then .issueName
+                          # Depois tenta campos padrão
+                          elif .subCategory then .subCategory
+                          elif .category then .category
+                          elif .kingdom then .kingdom
+                          else "Unknown"
+                          end' 2>/dev/null)
+                      
+                      echo "$categoria"
+                  }
+                  
                   fortify_extrair_estatisticas_completas() {
                       echo "📊 Extraindo estatísticas completas de vulnerabilidades..."
                       
@@ -159,6 +197,15 @@ jobs:
                           return 0
                       fi
                       
+                      # Salva os dados para análise
+                      echo "$all_issues_response" > /tmp/fortify_all_issues.json
+                      
+                      # Executa debug para entender a estrutura
+                      fortify_debug_estrutura_dados
+                      
+                      # Busca informações detalhadas sobre categorias
+                      fortify_buscar_categorias_detalhadas
+                      
                       # Contadores por severidade (tenta friority e priority como fallback)
                       critical_count=$(echo "$all_issues_response" | jq '[.data[] | select((.friority // .priority) == "Critical")] | length')
                       high_count=$(echo "$all_issues_response" | jq '[.data[] | select((.friority // .priority) == "High")] | length')
@@ -174,7 +221,6 @@ jobs:
                       total_count=${total_count:-0}
                       
                       # Salva para uso posterior
-                      echo "$all_issues_response" > /tmp/fortify_all_issues.json
                       echo "$critical_count" > /tmp/fortify_critical_count
                       echo "$high_count" > /tmp/fortify_high_count  
                       echo "$medium_count" > /tmp/fortify_medium_count
@@ -200,14 +246,30 @@ jobs:
                     echo "| CATEGORY                                | ISSUE ID   | SEVERITY | PRIMARY LOCATION                        | RECOMMENDATIONS                          |"
                     echo "+-----------------------------------------+------------+----------+-----------------------------------------+------------------------------------------+"
                     
-                    # Mostra até 10 findings
+                    # Mostra até 10 findings com categoria melhorada
                     cat /tmp/fortify_all_issues.json 2>/dev/null | jq -r '
                         .data | .[0:10] | .[] | [
-                            (.subCategory // .category // .kingdom // "Unknown"),
+                            # Nova lógica de categoria mais precisa
+                            (if .subCategoryName then .subCategoryName
+                             elif .categoryName then .categoryName
+                             elif .issueName then .issueName
+                             elif .subCategory then .subCategory
+                             elif .category then .category
+                             elif .kingdom then .kingdom
+                             else "Unknown"
+                             end),
                             (.issueInstanceId // (.id | tostring)),
                             (.friority // .priority // "Unknown"),
                             ((.fileName // .primaryLocation // .folderName // "Unknown File") + ":" + ((.lineNumber // "N/A")|tostring)),
-                            (.subCategory // .category // .kingdom // "Security vulnerability")
+                            # Recomendação também melhorada
+                            (if .subCategoryName then .subCategoryName
+                             elif .categoryName then .categoryName
+                             elif .issueName then .issueName
+                             elif .subCategory then .subCategory
+                             elif .category then .category
+                             elif .kingdom then .kingdom
+                             else "Security vulnerability"
+                             end)
                         ] | @tsv' | while IFS=$'\t' read -r category issue severity location recommendation; do
                         printf "| %-41s | %-10s | %-8s | %-39s | %-40s |\n" \
                             "${category:0:41}" "${issue:0:10}" "${severity:0:8}" "${location:0:39}" "${recommendation:0:40}"
@@ -219,12 +281,67 @@ jobs:
                     echo "+------------------+----------+----------+----------+----------+----------+"
                     echo "| CATEGORY         | CRITICAL | HIGH     | MEDIUM   | LOW      | TOTAL    |"
                     echo "+------------------+----------+----------+----------+----------+----------+"
+                    
+                    # Breakdown por categoria com lógica melhorada
                     cat /tmp/fortify_all_issues.json 2>/dev/null | jq -r '
-                        [.data[] | (.subCategory // .category // .kingdom // "Unknown")] | unique | .[]' | while read -r category; do
-                        cat_critical=$(cat /tmp/fortify_all_issues.json | jq --arg cat "$category" '[.data[] | select((.subCategory // .category // .kingdom // "Unknown") == $cat and (.friority // .priority) == "Critical")] | length')
-                        cat_high=$(cat /tmp/fortify_all_issues.json | jq --arg cat "$category" '[.data[] | select((.subCategory // .category // .kingdom // "Unknown") == $cat and (.friority // .priority) == "High")] | length')
-                        cat_medium=$(cat /tmp/fortify_all_issues.json | jq --arg cat "$category" '[.data[] | select((.subCategory // .category // .kingdom // "Unknown") == $cat and (.friority // .priority) == "Medium")] | length')
-                        cat_low=$(cat /tmp/fortify_all_issues.json | jq --arg cat "$category" '[.data[] | select((.subCategory // .category // .kingdom // "Unknown") == $cat and (.friority // .priority) == "Low")] | length')
+                        [.data[] | (if .subCategoryName then .subCategoryName
+                                   elif .categoryName then .categoryName
+                                   elif .issueName then .issueName
+                                   elif .subCategory then .subCategory
+                                   elif .category then .category
+                                   elif .kingdom then .kingdom
+                                   else "Unknown"
+                                   end)] | unique | .[]' | while read -r category; do
+                        
+                        # Conta por categoria usando a mesma lógica
+                        cat_critical=$(cat /tmp/fortify_all_issues.json | jq --arg cat "$category" '
+                            [.data[] | select(
+                                (if .subCategoryName then .subCategoryName
+                                 elif .categoryName then .categoryName
+                                 elif .issueName then .issueName
+                                 elif .subCategory then .subCategory
+                                 elif .category then .category
+                                 elif .kingdom then .kingdom
+                                 else "Unknown"
+                                 end) == $cat and (.friority // .priority) == "Critical"
+                            )] | length')
+                        
+                        cat_high=$(cat /tmp/fortify_all_issues.json | jq --arg cat "$category" '
+                            [.data[] | select(
+                                (if .subCategoryName then .subCategoryName
+                                 elif .categoryName then .categoryName
+                                 elif .issueName then .issueName
+                                 elif .subCategory then .subCategory
+                                 elif .category then .category
+                                 elif .kingdom then .kingdom
+                                 else "Unknown"
+                                 end) == $cat and (.friority // .priority) == "High"
+                            )] | length')
+                        
+                        cat_medium=$(cat /tmp/fortify_all_issues.json | jq --arg cat "$category" '
+                            [.data[] | select(
+                                (if .subCategoryName then .subCategoryName
+                                 elif .categoryName then .categoryName
+                                 elif .issueName then .issueName
+                                 elif .subCategory then .subCategory
+                                 elif .category then .category
+                                 elif .kingdom then .kingdom
+                                 else "Unknown"
+                                 end) == $cat and (.friority // .priority) == "Medium"
+                            )] | length')
+                        
+                        cat_low=$(cat /tmp/fortify_all_issues.json | jq --arg cat "$category" '
+                            [.data[] | select(
+                                (if .subCategoryName then .subCategoryName
+                                 elif .categoryName then .categoryName
+                                 elif .issueName then .issueName
+                                 elif .subCategory then .subCategory
+                                 elif .category then .category
+                                 elif .kingdom then .kingdom
+                                 else "Unknown"
+                                 end) == $cat and (.friority // .priority) == "Low"
+                            )] | length')
+                        
                         cat_total=$((cat_critical + cat_high + cat_medium + cat_low))
                         if [ "$cat_total" -gt "0" ]; then
                             printf "| %-16s | %-8s | %-8s | %-8s | %-8s | %-8s |\n" \
@@ -246,6 +363,132 @@ jobs:
                     ssc_base_url=$(echo "$fortify_ssc_api_url" | sed 's|/api/v1||g')
                     printf "| 🔗 Detailed Report: %-54s |\n" "${ssc_base_url}/html/ssc/version/${fortify_project_version_id}/fix"
                     echo "+---------------------------------------------------------------------------------+"
+                  }
+
+                  gerar_relatorio_fortify_alternativo() {
+                    echo ""
+                    echo "+---------------- FORTIFY SAST SCAN SUMMARY (ALTERNATIVE) ----------------+"
+                    echo "| Projeto: $fortify_project_name v$fortify_version_name"
+                    echo "+----------------------------------------------------------+"
+                    
+                    # Lê contadores salvos
+                    critical_count=$(cat /tmp/fortify_critical_count 2>/dev/null || echo 0)
+                    high_count=$(cat /tmp/fortify_high_count 2>/dev/null || echo 0)
+                    medium_count=$(cat /tmp/fortify_medium_count 2>/dev/null || echo 0)
+                    low_count=$(cat /tmp/fortify_low_count 2>/dev/null || echo 0)
+                    total_count=$(cat /tmp/fortify_total_count 2>/dev/null || echo 0)
+                    
+                    echo "| Total: $total_count (CRITICAL: $critical_count, HIGH: $high_count, MEDIUM: $medium_count, LOW: $low_count)"
+                    echo "+----------------------------------------------------------+"
+                    echo "| CATEGORY                                | ISSUE ID   | SEVERITY | PRIMARY LOCATION                        | RECOMMENDATIONS                          |"
+                    echo "+-----------------------------------------+------------+----------+-----------------------------------------+------------------------------------------+"
+                    
+                    # Versão alternativa com extração simplificada
+                    cat /tmp/fortify_all_issues.json 2>/dev/null | jq -r '
+                        .data | .[0:10] | .[] | [
+                            # Lógica alternativa mais simples
+                            (if .displayName then .displayName
+                             elif .name then .name
+                             elif .title then .title
+                             elif .description then .description
+                             elif .subCategoryName then .subCategoryName
+                             elif .categoryName then .categoryName
+                             elif .issueName then .issueName
+                             elif .subCategory then .subCategory
+                             elif .category then .category
+                             elif .kingdom then .kingdom
+                             else "Unknown"
+                             end),
+                            (.issueInstanceId // (.id | tostring)),
+                            (.friority // .priority // "Unknown"),
+                            ((.fileName // .primaryLocation // .folderName // "Unknown File") + ":" + ((.lineNumber // "N/A")|tostring)),
+                            # Recomendação também simplificada
+                            (if .displayName then .displayName
+                             elif .name then .name
+                             elif .title then .title
+                             elif .description then .description
+                             elif .subCategoryName then .subCategoryName
+                             elif .categoryName then .categoryName
+                             elif .issueName then .issueName
+                             elif .subCategory then .subCategory
+                             elif .category then .category
+                             elif .kingdom then .kingdom
+                             else "Security vulnerability"
+                             end)
+                        ] | @tsv' | while IFS=$'\t' read -r category issue severity location recommendation; do
+                        printf "| %-41s | %-10s | %-8s | %-39s | %-40s |\n" \
+                            "${category:0:41}" "${issue:0:10}" "${severity:0:8}" "${location:0:39}" "${recommendation:0:40}"
+                    done
+                    echo "+-----------------------------------------+------------+----------+-----------------------------------------+------------------------------------------+"
+                    
+                    echo ""
+                    echo "+---------------------------------------------------------------------------------+"
+                    echo "|📊 EXECUTIVE SUMMARY (ALTERNATIVE):                                                   |"
+                    echo "+---------------------------------------------------------------------------------+"
+                    printf "| 🔴 CRITICAL: %-67s |\n" "$critical_count"
+                    printf "| 🟠 HIGH: %-71s |\n" "$high_count"
+                    printf "| 🟡 MEDIUM: %-69s |\n" "$medium_count"
+                    printf "| 🔵 LOW: %-72s |\n" "$low_count"
+                    echo "|                                                                                 |"
+                    printf "| 📊Total Issues Found: %-58s |\n" "$total_count"
+                    ssc_base_url=$(echo "$fortify_ssc_api_url" | sed 's|/api/v1||g')
+                    printf "| 🔗 Detailed Report: %-54s |\n" "${ssc_base_url}/html/ssc/version/${fortify_project_version_id}/fix"
+                    echo "+---------------------------------------------------------------------------------+"
+                  }
+
+                  fortify_buscar_categorias_detalhadas() {
+                      echo "🔍 Buscando informações detalhadas sobre categorias..."
+                      
+                      # Tenta buscar categorias via API do Fortify (se disponível)
+                      local categorias_response=$(curl -sS -k -X GET --header 'Content-Type: application/json' \
+                          --header 'Accept: application/json' \
+                          --header "Authorization: FortifyToken $fortify_unified_login_token" \
+                          "$fortify_ssc_api_url/categories" 2>/dev/null)
+                      
+                      if [ $? -eq 0 ] && [ -n "$categorias_response" ]; then
+                          echo "✅ Informações de categorias encontradas via API"
+                          echo "$categorias_response" > /tmp/fortify_categories.json
+                          
+                          # Mostra algumas categorias disponíveis
+                          echo "📄 Categorias disponíveis:"
+                          echo "$categorias_response" | jq -r '.data[0:5] | .[] | "  - \(.name // .displayName // .id)"' 2>/dev/null || echo "  - Estrutura não reconhecida"
+                      else
+                          echo "⚠️ Endpoint de categorias não disponível ou não acessível"
+                      fi
+                      
+                      # Tenta buscar subcategorias também
+                      local subcategorias_response=$(curl -sS -k -X GET --header 'Content-Type: application/json' \
+                          --header 'Accept: application/json' \
+                          --header "Authorization: FortifyToken $fortify_unified_login_token" \
+                          "$fortify_ssc_api_url/subcategories" 2>/dev/null)
+                      
+                      if [ $? -eq 0 ] && [ -n "$subcategorias_response" ]; then
+                          echo "✅ Informações de subcategorias encontradas via API"
+                          echo "$subcategorias_response" > /tmp/fortify_subcategories.json
+                      fi
+                  }
+                  
+                  fortify_extrair_categoria_simples() {
+                      # Versão simplificada para extração de categoria
+                      # Tenta diferentes campos em ordem de prioridade
+                      local item="$1"
+                      
+                      # Primeiro tenta campos que podem conter nomes mais descritivos
+                      local categoria=$(echo "$item" | jq -r '
+                          if .displayName then .displayName
+                          elif .name then .name
+                          elif .title then .title
+                          elif .description then .description
+                          elif .subCategoryName then .subCategoryName
+                          elif .categoryName then .categoryName
+                          elif .issueName then .issueName
+                          elif .subCategory then .subCategory
+                          elif .category then .category
+                          elif .kingdom then .kingdom
+                          else "Unknown"
+                          end' 2>/dev/null)
+                      
+                      echo "$categoria"
                   }
 
                   # ========== EXECUÇÃO PRINCIPAL (MANTÉM O CÓDIGO ORIGINAL) ==========
@@ -307,7 +550,13 @@ jobs:
                     # Extrai estatísticas completas
                     if fortify_extrair_estatisticas_completas; then
                         # Gera relatório visual apenas se a extração foi bem-sucedida
+                        echo ""
+                        echo "📊 GERANDO RELATÓRIO PRINCIPAL:"
                         gerar_relatorio_fortify
+                        
+                        echo ""
+                        echo "📊 GERANDO RELATÓRIO ALTERNATIVO (para comparação):"
+                        gerar_relatorio_fortify_alternativo
                     else
                         echo "⚠️ Não foi possível extrair dados de vulnerabilidades para gerar relatório detalhado."
                         echo "   O gate de qualidade ainda será aplicado normalmente."

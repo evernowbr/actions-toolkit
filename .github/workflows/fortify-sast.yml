@@ -203,7 +203,7 @@ jobs:
                     echo "+-----------------------------------------+------------+----------+-----------------------------------------+------------------------------------------+"
                     
                     # Mostra até 10 findings com categoria otimizada - issueName contém o nome detalhado
-                    printf "| %-48s | %-12s | %-13s | %-32s | %-14s | %-32s |\n" "CATEGORY" "ISSUE ID" "SEVERITY" "LOCATION" "TAGGED" "RECOMMENDATIONS"
+                    printf "| %-48s | %-12s | %-13s | %-32s | %-14s | %-32s |\n" "CATEGORY" "ISSUE ID" "SEVERITY" "LOCATION" "TAGGED" "RECOMMENDATION"
                     printf "|--------------------------------------------------|--------------|--------------|----------------------------------|--------------|----------------------------------|\n"
 
                     cat /tmp/fortify_all_issues.json 2>/dev/null | jq -r '
@@ -219,34 +219,19 @@ jobs:
                         (.issueInstanceId // (.id | tostring) // "-"),
                         (.friority // .priority // "Unknown"),
                         ((.fileName // .primaryLocation // .folderName // "Unknown File") + ":" + ((.lineNumber // "N/A")|tostring)),
-                        (if .tagged then .tagged elif .tag then .tag elif .taggedValue then .taggedValue elif .customTagValues and (.customTagValues|length)>0 then (.customTagValues[0].value) else "-" end),
+                        (if .customTagValues and (.customTagValues|length)>0 then
+                            ([.customTagValues[] | select(.name == "Tagged") | .value] | .[0] // [.customTagValues[] | .value][0] // "-")
+                         else "-" end),
                         (.recommendation // .description // "Ver detalhes no SSC")
                       ] | @tsv' | while IFS=$'\t' read -r category issue severity location tagged recommendation; do
-                        # Garante que todos os campos tenham valor
-                        category="${category:--}"
-                        issue="${issue:--}"
-                        severity="${severity:--}"
-                        location="${location:--}"
-                        tagged="${tagged:--}"
-                        recommendation="${recommendation:--}"
+                        # Trunca campos longos para manter o alinhamento
+                        [ ${#category} -gt 48 ] && category="${category:0:45}..."
+                        [ ${#location} -gt 32 ] && location="${location:0:29}..."
+                        [ ${#recommendation} -gt 32 ] && recommendation="${recommendation:0:29}..."
+                        [ ${#tagged} -gt 14 ] && tagged="${tagged:0:11}..."
 
-                        # Quebra campos longos em até 3 linhas
-                        cat1="${category:0:48}"; cat2="${category:48:48}"; cat3="${category:96:48}"
-                        loc1="${location:0:32}"; loc2="${location:32:32}"; loc3="${location:64:32}"
-                        rec1="${recommendation:0:32}"; rec2="${recommendation:32:32}"; rec3="${recommendation:64:32}"
-
-                        # Imprime a primeira linha
                         printf "| %-48s | %-12s | %-13s | %-32s | %-14s | %-32s |\n" \
-                          "$cat1" "$issue" "$severity" "$loc1" "$tagged" "$rec1"
-                        # Imprime as linhas seguintes se houver
-                        if [ -n "$cat2$loc2$rec2" ]; then
-                          printf "| %-48s | %-12s | %-13s | %-32s | %-14s | %-32s |\n" \
-                            "$cat2" "" "" "$loc2" "" "$rec2"
-                        fi
-                        if [ -n "$cat3$loc3$rec3" ]; then
-                          printf "| %-48s | %-12s | %-13s | %-32s | %-14s | %-32s |\n" \
-                            "$cat3" "" "" "$loc3" "" "$rec3"
-                        fi
+                          "$category" "$issue" "$severity" "$location" "$tagged" "$recommendation"
                         printf "|--------------------------------------------------|--------------|--------------|----------------------------------|--------------|----------------------------------|\n"
                     done
                     

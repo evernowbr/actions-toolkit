@@ -216,7 +216,7 @@ jobs:
                         (.issueInstanceId // (.id | tostring)),
                         (.friority // .priority // "Unknown"),
                         ((.fileName // .primaryLocation // .folderName // "Unknown File") + ":" + ((.lineNumber // "N/A")|tostring)),
-                        (.tagged // .tag // .taggedValue // ""),
+                        (if .tagged then .tagged elif .tag then .tag elif .taggedValue then .taggedValue elif .customTagValues and (.customTagValues|length)>0 then (.customTagValues[0].value) else "-" end),
                         (.recommendation // .description // "Ver detalhes no SSC")
                       ] | @tsv' | while IFS=$'\t' read -r category issue severity location tagged recommendation; do
                         # Quebra recomendação longa em até 3 linhas de 32 caracteres

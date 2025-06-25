@@ -187,8 +187,8 @@ jobs:
                   gerar_relatorio_fortify() {
                     echo ""
                     echo "+--------------------- FORTIFY SAST SCAN SUMMARY ---------------------+"
-                    echo "| Projeto: $fortify_project_name v$fortify_version_name"
-                    echo "+--------------------------------------------------------------------+"
+                    echo "| Projeto: $fortify_project_name Versão: $fortify_version_name"
+                    echo "+---------------------------------------------------------------------+"
                     
                     # Lê contadores salvos
                     critical_count=$(cat /tmp/fortify_critical_count 2>/dev/null || echo 0)
@@ -198,7 +198,7 @@ jobs:
                     total_count=$(cat /tmp/fortify_total_count 2>/dev/null || echo 0)
                     
                     echo "| Total: $total_count (CRITICAL: $critical_count, HIGH: $high_count, MEDIUM: $medium_count, LOW: $low_count)"
-                    echo "+--------------------------------------------------------------------+"
+                    echo "+--------------------------------------------------------------------------------------------------------------------+"
                     echo "| CATEGORY                     | ISSUE ID   | SEVERITY | PRIMARY LOCATION             | RECOMMENDATIONS               |"
                     echo "+------------------------------+------------+----------+-----------------------------+-------------------------------+"
                     
@@ -216,6 +216,7 @@ jobs:
                         (.issueInstanceId // (.id | tostring)),
                         (.friority // .priority // "Unknown"),
                         ((.fileName // .primaryLocation // .folderName // "Unknown File") + ":" + ((.lineNumber // "N/A")|tostring)),
+                        
                         (.description // "Ver detalhes no SSC")
                       ] | @tsv' | while IFS=$'\t' read -r category issue severity location recommendation; do
                         printf "| %-28s | %-10s | %-8s | %-27s | %-29s |\n" \

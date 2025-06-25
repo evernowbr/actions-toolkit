@@ -187,8 +187,8 @@ jobs:
                   gerar_relatorio_fortify() {
                     echo ""
                     echo "+--------------------- FORTIFY SAST SCAN SUMMARY ---------------------+"
-                    echo "| Projeto: $fortify_project_name Versão: $fortify_version_name"
-                    echo "+---------------------------------------------------------------------+"
+                    echo "| Projeto: $fortify_project_name v$fortify_version_name"
+                    echo "+--------------------------------------------------------------------+"
                     
                     # Lê contadores salvos
                     critical_count=$(cat /tmp/fortify_critical_count 2>/dev/null || echo 0)
@@ -198,9 +198,9 @@ jobs:
                     total_count=$(cat /tmp/fortify_total_count 2>/dev/null || echo 0)
                     
                     echo "| Total: $total_count (CRITICAL: $critical_count, HIGH: $high_count, MEDIUM: $medium_count, LOW: $low_count)"
-                    echo "+--------------------------------------------------------------------------------------------------------------------+"
-                    echo "| CATEGORY                     | ISSUE ID   | SEVERITY | PRIMARY LOCATION            | RECOMMENDATIONS               |"
-                    echo "+------------------------------+------------+----------+-----------------------------+-------------------------------+"
+                    echo "+--------------------------------------------------------------------+"
+                    printf "| %-32s | %-12s | %-13s | %-22s | %-14s | %-32s |\n" "CATEGORY" "ISSUE ID" "SEVERITY" "LOCATION" "TAGGED" "RECOMMENDATION"
+                    printf "|----------------------------------|--------------|--------------|-----------------------|--------------|----------------------------------|\n"
                     
                     # Mostra até 10 findings com layout ajustado e recomendação melhorada
                     cat /tmp/fortify_all_issues.json 2>/dev/null | jq -r '
@@ -216,24 +216,34 @@ jobs:
                         (.issueInstanceId // (.id | tostring)),
                         (.friority // .priority // "Unknown"),
                         ((.fileName // .primaryLocation // .folderName // "Unknown File") + ":" + ((.lineNumber // "N/A")|tostring)),
-                        
-                        (.description // "Ver detalhes no SSC")
-                      ] | @tsv' | while IFS=$'\t' read -r category issue severity location recommendation; do
-                        printf "| %-28s | %-10s | %-8s | %-27s | %-29s |\n" \
-                          "${category:0:28}" "${issue:0:10}" "${severity:0:8}" "${location:0:27}" "${recommendation:0:29}"
+                        (.tagged // .tag // .taggedValue // ""),
+                        (.recommendation // .description // "Ver detalhes no SSC")
+                      ] | @tsv' | while IFS=$'\t' read -r category issue severity location tagged recommendation; do
+                        # Quebra recomendação longa em até 3 linhas de 32 caracteres
+                        rec1="${recommendation:0:32}"
+                        rec2="${recommendation:32:32}"
+                        rec3="${recommendation:64:32}"
+                        printf "| %-32s | %-12s | %-13s | %-22s | %-14s | %-32s |\n" \
+                          "${category:0:32}" "${issue:0:12}" "${severity:0:13}" "${location:0:22}" "${tagged:0:14}" "$rec1"
+                        if [ -n "$rec2" ]; then
+                          printf "| %-32s | %-12s | %-13s | %-22s | %-14s | %-32s |\n" "" "" "" "" "" "$rec2"
+                        fi
+                        if [ -n "$rec3" ]; then
+                          printf "| %-32s | %-12s | %-13s | %-22s | %-14s | %-32s |\n" "" "" "" "" "" "$rec3"
+                        fi
+                        printf "|----------------------------------|--------------|--------------|-----------------------|--------------|----------------------------------|\n"
                     done
-                    echo "+------------------------------+------------+----------+-----------------------------+-------------------------------+"
                     
                     echo ""
                     echo "+--------------------------- EXECUTIVE SUMMARY -----------------------+"
-                    echo "|🔴 CRITICAL: $critical_count" 
-                    echo "|🟠 HIGH:     $high_count" 
-                    echo "|🟡 MEDIUM:   $medium_count" 
-                    echo "|⚪ LOW:      $low_count" 
+                    echo "| CRITICAL: $critical_count" 
+                    echo "| HIGH:     $high_count" 
+                    echo "| MEDIUM:   $medium_count" 
+                    echo "| LOW:      $low_count" 
                     echo "|" 
                     echo "| Total Issues Found: $total_count" 
                     ssc_base_url=$(echo "$fortify_ssc_api_url" | sed 's|/api/v1||g')
-                    echo "| Detailed Report: ${ssc_base_url}/html/ssc/version/${fortify_project_version_id}/audit" 
+                    echo "| Detailed Report: ${ssc_base_url}/html/ssc/version/${fortify_project_version_id}/fix" 
                     echo "+--------------------------------------------------------------------+"
                   }
                   
@@ -271,7 +281,7 @@ jobs:
                   fortify_regras_processamento
                   
                   echo "🔧 Executando Scancentral Client"
-                  output=$($fortify_scancentral_tool -ssctoken $fortify_controller_token -url $fortify_controller_url start -bt none -skipBuild -block --log-file fortify.log --overwrite -application $fortify_project_name -version $fortify_version_name --upload-to-ssc --ssc-upload-token $fortify_controller_token 2>&1 | tee /dev/stderr )                    
+                  output=$($fortify_scancentral_tool -ssctoken $fortify_controller_token -url $fortify_controller_url start -skipBuild -block --log-file fortify.log --overwrite -application $fortify_project_name -version $fortify_version_name --upload-to-ssc --ssc-upload-token $fortify_controller_token 2>&1 | tee /dev/stderr )                    
                   
                   # Verifica o código de resposta
                   exit_code=$?

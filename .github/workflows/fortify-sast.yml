@@ -270,7 +270,7 @@ jobs:
                   fortify_regras_processamento
                   
                   echo "🔧 Executando Scancentral Client"
-                  output=$($fortify_scancentral_tool -ssctoken $fortify_controller_token -url $fortify_controller_url start -skipBuild -block --log-file fortify.log --overwrite -application $fortify_project_name -version $fortify_version_name --upload-to-ssc --ssc-upload-token $fortify_controller_token 2>&1 | tee /dev/stderr )                    
+                  output=$($fortify_scancentral_tool -ssctoken $fortify_controller_token -url $fortify_controller_url start -bt none -skipBuild -block --log-file fortify.log --overwrite -application $fortify_project_name -version $fortify_version_name --upload-to-ssc --ssc-upload-token $fortify_controller_token 2>&1 | tee /dev/stderr )                    
                   
                   # Verifica o código de resposta
                   exit_code=$?

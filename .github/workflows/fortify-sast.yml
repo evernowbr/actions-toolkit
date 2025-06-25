@@ -199,7 +199,7 @@ jobs:
                     
                     echo "| Total: $total_count (CRITICAL: $critical_count, HIGH: $high_count, MEDIUM: $medium_count, LOW: $low_count)"
                     echo "+--------------------------------------------------------------------------------------------------------------------+"
-                    echo "| CATEGORY                     | ISSUE ID   | SEVERITY | PRIMARY LOCATION             | RECOMMENDATIONS               |"
+                    echo "| CATEGORY                     | ISSUE ID   | SEVERITY | PRIMARY LOCATION            | RECOMMENDATIONS               |"
                     echo "+------------------------------+------------+----------+-----------------------------+-------------------------------+"
                     
                     # Mostra até 10 findings com layout ajustado e recomendação melhorada
@@ -226,10 +226,10 @@ jobs:
                     
                     echo ""
                     echo "+--------------------------- EXECUTIVE SUMMARY -----------------------+"
-                    echo "| CRITICAL: $critical_count" 
-                    echo "| HIGH:     $high_count" 
-                    echo "| MEDIUM:   $medium_count" 
-                    echo "| LOW:      $low_count" 
+                    echo "|🔴 CRITICAL: $critical_count" 
+                    echo "|🟠 HIGH:     $high_count" 
+                    echo "|🟡 MEDIUM:   $medium_count" 
+                    echo "|⚪ LOW:      $low_count" 
                     echo "|" 
                     echo "| Total Issues Found: $total_count" 
                     ssc_base_url=$(echo "$fortify_ssc_api_url" | sed 's|/api/v1||g')

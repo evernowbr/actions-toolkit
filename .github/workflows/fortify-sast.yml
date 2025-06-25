@@ -232,7 +232,7 @@ jobs:
                     echo "|" 
                     echo "| Total Issues Found: $total_count" 
                     ssc_base_url=$(echo "$fortify_ssc_api_url" | sed 's|/api/v1||g')
-                    echo "| Detailed Report: ${ssc_base_url}/html/ssc/version/${fortify_project_version_id}/fix" 
+                    echo "| Detailed Report: ${ssc_base_url}/html/ssc/version/${fortify_project_version_id}/audit" 
                     echo "+--------------------------------------------------------------------+"
                   }
                   

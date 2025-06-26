@@ -242,10 +242,7 @@ jobs:
                     
                     cat /tmp/fortify_all_issues.json | jq -r '
                       .data[] | 
-                      {
-                        category: (.subCategoryName // .categoryName // .issueName // .subCategory // .category // .kingdom // "Unknown"),
-                        severity: (.friority // .priority // "Unknown")
-                      } | @tsv' | awk -F'\t' '
+                      [(.subCategoryName // .categoryName // .issueName // .subCategory // .category // .kingdom // "Unknown"), (.friority // .priority // "Unknown")] | @tsv' | awk -F'\t' '
                       {
                         c[$1, $2]++;
                         cat[$1]=1;

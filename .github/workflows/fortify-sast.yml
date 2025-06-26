@@ -187,8 +187,8 @@ jobs:
                   gerar_relatorio_fortify() {
                     echo ""
                     echo "+--------------------- FORTIFY SAST SCAN SUMMARY ---------------------+"
-                    echo "| Projeto: $fortify_project_name Versão: $fortify_version_name"
-                    echo "+---------------------------------------------------------------------+"
+                    echo "| Projeto: $fortify_project_name v$fortify_version_name"
+                    echo "+--------------------------------------------------------------------+"
                     
                     # Lê contadores salvos
                     critical_count=$(cat /tmp/fortify_critical_count 2>/dev/null || echo 0)
@@ -198,11 +198,28 @@ jobs:
                     total_count=$(cat /tmp/fortify_total_count 2>/dev/null || echo 0)
                     
                     echo "| Total: $total_count (CRITICAL: $critical_count, HIGH: $high_count, MEDIUM: $medium_count, LOW: $low_count)"
-                    echo "+--------------------------------------------------------------------------------------------------------------------+"
-                    echo "| CATEGORY                     | ISSUE ID   | SEVERITY | PRIMARY LOCATION            | RECOMMENDATIONS               |"
-                    echo "+------------------------------+------------+----------+-----------------------------+-------------------------------+"
+                    echo "+--------------------------------------------------------------------+"
+                    echo "| CATEGORY                     | ISSUE ID   | SEVERITY | PRIMARY LOCATION             | TAGGED         | RECOMMENDATIONS               |"
+                    echo "+------------------------------+------------+----------+-----------------------------+----------------+-------------------------------+"
                     
-                    # Mostra até 10 findings com layout ajustado e recomendação melhorada
+                    # Função para quebrar texto em até 3 linhas de 28 caracteres
+                    split_lines() {
+                      local text="$1"
+                      local width=28
+                      local max_lines=3
+                      local lines=()
+                      while [[ ${#text} -gt $width && ${#lines[@]} -lt $((max_lines-1)) ]]; do
+                        lines+=("${text:0:$width}")
+                        text="${text:$width}"
+                      done
+                      lines+=("$text")
+                      while [[ ${#lines[@]} -lt $max_lines ]]; do
+                        lines+=("")
+                      done
+                      printf "%s\n%s\n%s" "${lines[0]}" "${lines[1]}" "${lines[2]}"
+                    }
+
+                    # Mostra até 10 findings com layout ajustado, campo Tagged e recomendação melhorada
                     cat /tmp/fortify_all_issues.json 2>/dev/null | jq -r '
                       .data | .[0:10] | .[] | [
                         (if .subCategoryName then .subCategoryName
@@ -216,20 +233,29 @@ jobs:
                         (.issueInstanceId // (.id | tostring)),
                         (.friority // .priority // "Unknown"),
                         ((.fileName // .primaryLocation // .folderName // "Unknown File") + ":" + ((.lineNumber // "N/A")|tostring)),
-                        
+                        (.tagged // .customTag // .tag // "N/A"),
                         (.description // "Ver detalhes no SSC")
-                      ] | @tsv' | while IFS=$'\t' read -r category issue severity location recommendation; do
-                        printf "| %-28s | %-10s | %-8s | %-27s | %-29s |\n" \
-                          "${category:0:28}" "${issue:0:10}" "${severity:0:8}" "${location:0:27}" "${recommendation:0:29}"
+                      ] | @tsv' | while IFS=$'\t' read -r category issue severity location tagged recommendation; do
+                        # Quebra o campo category em até 3 linhas
+                        IFS=$'\n' read -r line1 line2 line3 < <(split_lines "$category" 28 3)
+                        # Primeira linha com todos os campos
+                        printf "| %-28s | %-10s | %-8s | %-27s | %-15s | %-29s |\n" \
+                          "$line1" "${issue:0:10}" "${severity:0:8}" "${location:0:27}" "${tagged:0:15}" "${recommendation:0:29}"
+                        # Linhas seguintes só com category
+                        for extra_line in "$line2" "$line3"; do
+                          if [[ -n "$extra_line" ]]; then
+                            printf "| %-28s | %-10s | %-8s | %-27s | %-15s | %-29s |\n" "$extra_line" "" "" "" "" ""
+                          fi
+                        done
                     done
-                    echo "+------------------------------+------------+----------+-----------------------------+-------------------------------+"
+                    echo "+------------------------------+------------+----------+-----------------------------+----------------+-------------------------------+"
                     
                     echo ""
                     echo "+--------------------------- EXECUTIVE SUMMARY -----------------------+"
-                    echo "|🔴 CRITICAL: $critical_count" 
-                    echo "|🟠 HIGH:     $high_count" 
-                    echo "|🟡 MEDIUM:   $medium_count" 
-                    echo "|⚪ LOW:      $low_count" 
+                    echo "| CRITICAL: $critical_count" 
+                    echo "| HIGH:     $high_count" 
+                    echo "| MEDIUM:   $medium_count" 
+                    echo "| LOW:      $low_count" 
                     echo "|" 
                     echo "| Total Issues Found: $total_count" 
                     ssc_base_url=$(echo "$fortify_ssc_api_url" | sed 's|/api/v1||g')
@@ -271,7 +297,7 @@ jobs:
                   fortify_regras_processamento
                   
                   echo "🔧 Executando Scancentral Client"
-                  output=$($fortify_scancentral_tool -ssctoken $fortify_controller_token -url $fortify_controller_url start -bt none -skipBuild -block --log-file fortify.log --overwrite -application $fortify_project_name -version $fortify_version_name --upload-to-ssc --ssc-upload-token $fortify_controller_token 2>&1 | tee /dev/stderr )                    
+                  output=$($fortify_scancentral_tool -ssctoken $fortify_controller_token -url $fortify_controller_url start -skipBuild -block --log-file fortify.log --overwrite -application $fortify_project_name -version $fortify_version_name --upload-to-ssc --ssc-upload-token $fortify_controller_token 2>&1 | tee /dev/stderr )                    
                   
                   # Verifica o código de resposta
                   exit_code=$?

@@ -219,25 +219,17 @@ jobs:
                         (.analysisType // .analysis.analysisType // .analysisName // .analysis // "N/A"),
                         (.description // "Ver detalhes no SSC")
                       ] | @tsv' | while IFS=$'\t' read -r category issue severity location tagged recommendation; do
-                        line1="${category:0:28}"
-                        line2=""
-                        line3=""
-                        if [[ ${#category} -gt 28 ]]; then
-                          line2="${category:28:28}"
-                        fi
-                        if [[ ${#category} -gt 56 ]]; then
-                          line3="${category:56:28}"
-                        fi
-                        printf "| %-28s | %-10s | %-8s | %-27s | %-15s | %-29s |\n" \
-                          "$line1" "${issue:0:10}" "${severity:0:8}" "${location:0:27}" "${tagged:0:15}" "${recommendation:0:29}"
-                        if [[ -n "$line2" ]]; then
-                          printf "| %-28s | %-10s | %-8s | %-27s | %-15s | %-29s |\n" "$line2" "" "" "" "" ""
-                        fi
-                        if [[ -n "$line3" ]]; then
-                          printf "| %-28s | %-10s | %-8s | %-27s | %-15s | %-29s |\n" "$line3" "" "" "" "" ""
-                        fi
+                        mapfile -t lines < <(echo "$category" | fold -s -w 28 | head -n 3)
+                        for i in "${!lines[@]}"; do
+                          if [[ $i -eq 0 ]]; then
+                            printf "| %-28s | %-10s | %-8s | %-27s | %-15s | %-29s |\n" \
+                              "${lines[$i]}" "${issue:0:10}" "${severity:0:8}" "${location:0:27}" "${tagged:0:15}" "${recommendation:0:29}"
+                          else
+                            printf "| %-28s | %-10s | %-8s | %-27s | %-15s | %-29s |\n" "${lines[$i]}" "" "" "" "" ""
+                          fi
+                        done
+                        echo "+------------------------------+------------+----------+------------------------------+----------------+-------------------------------+"
                     done
-                    echo "+------------------------------+------------+----------+------------------------------+----------------+-------------------------------+"
                     
                     # BREAKDOWN DETALHADO POR CATEGORIA E SEVERIDADE
                     echo "\n🔍 DETAILED BREAKDOWN BY CATEGORY:"
@@ -248,6 +240,21 @@ jobs:
                     cat /tmp/fortify_all_issues.json | jq -r '
                       .data[] | 
                       [(.subCategoryName // .categoryName // .issueName // .subCategory // .category // .kingdom // "Unknown"), (.friority // .priority // "Unknown")] | @tsv' | awk -F'\t' '
+                      function wrap(str, width, arr, n, out, i, len) {
+                        n = split(str, arr, " ");
+                        out = arr[1];
+                        len = length(arr[1]);
+                        for (i=2; i<=n; i++) {
+                          if (len + 1 + length(arr[i]) > width) {
+                            out = out "\n" arr[i];
+                            len = length(arr[i]);
+                          } else {
+                            out = out " " arr[i];
+                            len += 1 + length(arr[i]);
+                          }
+                        }
+                        return out;
+                      }
                       {
                         c[$1, $2]++;
                         cat[$1]=1;
@@ -259,7 +266,16 @@ jobs:
                           med  = c[k, "Medium"]+0;
                           low  = c[k, "Low"]+0;
                           total = crit+high+med+low;
-                          printf "| %-16s | %-10d | %-8d | %-8d | %-8d | %-13d |\n", k, crit, high, med, low, total;
+                          wrapped = wrap(k, 28);
+                          n = split(wrapped, lines, "\n");
+                          for (i=1; i<=n; i++) {
+                            if (i==1) {
+                              printf "| %-28s | %-10d | %-8d | %-8d | %-8d | %-13d |\n", lines[i], crit, high, med, low, total;
+                            } else {
+                              printf "| %-28s | %-10s | %-8s | %-8s | %-8s | %-13s |\n", lines[i], "", "", "", "", "";
+                            }
+                          }
+                          print "+------------------------------+----------+----------+----------+----------+---------------+"
                         }
                       }'
                     echo "+------------------+----------+----------+----------+----------+---------------+"

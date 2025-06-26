@@ -232,6 +232,7 @@ jobs:
                     done
                     
                     # BREAKDOWN DETALHADO POR CATEGORIA E SEVERIDADE
+                    echo ""
                     echo "DETAILED BREAKDOWN BY CATEGORY:"
                     echo "+------------------------------+------------+----------+----------+----------+---------------+"
                     echo "| CATEGORY                     | CRITICAL   | HIGH     | MEDIUM   | LOW      | TOTAL ISSUES  |"
@@ -272,23 +273,23 @@ jobs:
                             if (i==1) {
                               printf "| %-28s | %-12d | %-10d | %-10d | %-10d | %-15d |\n", lines[i], crit, high, med, low, total;
                             } else {
-                              printf "| %-28s | %-12s | %-10s | %-10s | %-10s | %-15s |\n", lines[i], "", "", "", "", "";
+                              printf "|   %-26s | %-12s | %-10s | %-10s | %-10s | %-15s |\n", lines[i], "", "", "", "", "";
                             }
                           }
                           print "+------------------------------+------------+----------+----------+----------+---------------+"
                         }
                       }'
                     echo "+------------------------------+------------+----------+----------+----------+---------------+"
-                    
                     echo ""
-                    echo "📊 EXECUTIVE SUMMARY:"
-                    echo "+-----------------------------------------+"
-                    echo "| 🔴 CRITICAL: $critical_count"
-                    echo "| 🟠 HIGH: $high_count"
-                    echo "| 🟡 MEDIUM: $medium_count"
-                    echo "| 🔵 LOW: $low_count"
-                    echo "| 📊 Total Issues Found: $total_count"
-                    echo "+-----------------------------------------+"
+                    
+                    echo "EXECUTIVE SUMMARY:"
+                    echo "+-------------------------------+"
+                    echo "| CRITICAL: $critical_count"
+                    echo "| HIGH:    $high_count"
+                    echo "| MEDIUM:  $medium_count"
+                    echo "| LOW:     $low_count"
+                    echo "| TOTAL ISSUES FOUND: $total_count"
+                    echo "+-------------------------------+"
                     echo ""
                     echo "🔗 Detailed Report: ${ssc_base_url}/html/ssc/version/${fortify_project_version_id}/audit"
                     echo "+-------------------------------------------------------------------------------------------------------------+"

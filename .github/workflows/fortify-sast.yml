@@ -261,6 +261,8 @@ jobs:
                         cat[$1]=1;
                       }
                       END {
+                        sep = "+------------------------------+------------+----------+----------+----------+---------------+";
+                        print sep;
                         for (k in cat) {
                           crit = c[k, "Critical"]+0;
                           high = c[k, "High"]+0;
@@ -271,27 +273,31 @@ jobs:
                           n = split(wrapped, lines, "\n");
                           for (i=1; i<=n; i++) {
                             if (i==1) {
-                              printf "| %-28s | %-12d | %-10d | %-10d | %-10d | %-15d |\n", lines[i], crit, high, med, low, total;
+                              printf "| %-28s | %-10s | %-8s | %-8s | %-8s | %-13s |\n", lines[i], crit, high, med, low, total;
                             } else {
-                              printf "|   %-26s | %-12s | %-10s | %-10s | %-10s | %-15s |\n", lines[i], "", "", "", "", "";
+                              printf "|   %-26s | %-10s | %-8s | %-8s | %-8s | %-13s |\n", lines[i], "", "", "", "", "";
                             }
                           }
-                          print "+------------------------------+------------+----------+----------+----------+---------------+"
+                          print sep;
                         }
                       }'
-                    echo "+------------------------------+------------+----------+----------+----------+---------------+"
                     echo ""
                     
                     echo "EXECUTIVE SUMMARY:"
                     echo "+-------------------------------+"
-                    echo "| CRITICAL: $critical_count"
-                    echo "| HIGH:    $high_count"
-                    echo "| MEDIUM:  $medium_count"
-                    echo "| LOW:     $low_count"
-                    echo "| TOTAL ISSUES FOUND: $total_count"
+                    printf "| %-10s %3s                 |\n" "CRITICAL:" "$critical_count"
+                    printf "| %-10s %3s                 |\n" "HIGH:" "$high_count"
+                    printf "| %-10s %3s                 |\n" "MEDIUM:" "$medium_count"
+                    printf "| %-10s %3s                 |\n" "LOW:" "$low_count"
+                    printf "| %-18s %3s     |\n" "TOTAL ISSUES FOUND:" "$total_count"
                     echo "+-------------------------------+"
                     echo ""
-                    echo "🔗 Detailed Report: ${ssc_base_url}/html/ssc/version/${fortify_project_version_id}/audit"
+                    # Garantir link absoluto
+                    if [[ -n "$ssc_base_url" ]]; then
+                      echo "🔗 Detailed Report: ${ssc_base_url}/html/ssc/version/${fortify_project_version_id}/audit"
+                    else
+                      echo "🔗 Detailed Report: /html/ssc/version/${fortify_project_version_id}/audit"
+                    fi
                     echo "+-------------------------------------------------------------------------------------------------------------+"
                   }
                   

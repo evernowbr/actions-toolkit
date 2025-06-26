@@ -286,11 +286,11 @@ jobs:
                     
                     echo "EXECUTIVE SUMMARY:"
                     echo "+-------------------------------+"
-                    printf "| %-20s %-5s           |\n" "CRITICAL:" "$critical_count"
-                    printf "| %-20s %-5s           |\n" "HIGH:" "$high_count"
-                    printf "| %-20s %-5s           |\n" "MEDIUM:" "$medium_count"
-                    printf "| %-20s %-5s           |\n" "LOW:" "$low_count"
-                    printf "| %-20s %-5s           |\n" "TOTAL ISSUES FOUND:" "$total_count"
+                    printf "| CRITICAL: %s%*s|\n" "$critical_count" $((27 - ${#critical_count} - 9)) ""
+                    printf "| HIGH:    %s%*s|\n" "$high_count" $((27 - ${#high_count} - 6)) ""
+                    printf "| MEDIUM:  %s%*s|\n" "$medium_count" $((27 - ${#medium_count} - 8)) ""
+                    printf "| LOW:     %s%*s|\n" "$low_count" $((27 - ${#low_count} - 6)) ""
+                    printf "| TOTAL ISSUES FOUND: %s%*s|\n" "$total_count" $((27 - ${#total_count} - 19)) ""
                     echo "+-------------------------------+"
                     echo ""
                     # Garantir link absoluto

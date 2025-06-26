@@ -202,24 +202,7 @@ jobs:
                     echo "| CATEGORY                     | ISSUE ID   | SEVERITY | PRIMARY LOCATION             | TAGGED         | RECOMMENDATIONS               |"
                     echo "+------------------------------+------------+----------+------------------------------+----------------+-------------------------------+"
                     
-                    # Função para quebrar texto em até 3 linhas de 28 caracteres
-                    split_lines() {
-                      local text="$1"
-                      local width=28
-                      local max_lines=3
-                      local lines=()
-                      while [[ ${#text} -gt $width && ${#lines[@]} -lt $((max_lines-1)) ]]; do
-                        lines+=("${text:0:$width}")
-                        text="${text:$width}"
-                      done
-                      lines+=("$text")
-                      while [[ ${#lines[@]} -lt $max_lines ]]; do
-                        lines+=("")
-                      done
-                      printf "%s\n%s\n%s" "${lines[0]}" "${lines[1]}" "${lines[2]}"
-                    }
-
-                    # Mostra até 10 findings com layout ajustado, campo Tagged correto e recomendação melhorada
+                    # TABELA DETALHADA DE FINDINGS
                     cat /tmp/fortify_all_issues.json 2>/dev/null | jq -r '
                       .data | .[0:10] | .[] | [
                         (if .subCategoryName then .subCategoryName
@@ -249,19 +232,48 @@ jobs:
                           fi
                         done
                     done
-                    echo "+------------------------------+------------+----------+-----------------------------+----------------+-------------------------------+"
+                    echo "+------------------------------+------------+----------+------------------------------+----------------+-------------------------------+"
+                    
+                    # BREAKDOWN DETALHADO POR CATEGORIA E SEVERIDADE
+                    echo "\n🔍 DETAILED BREAKDOWN BY CATEGORY:"
+                    echo "+------------------+----------+----------+----------+----------+---------------+"
+                    echo "| CATEGORY         | 🔴 CRITICAL | 🟠 HIGH   | 🟡 MEDIUM | 🔵 LOW   | 📊 Total Issues |"
+                    echo "+------------------+----------+----------+----------+----------+---------------+"
+                    
+                    cat /tmp/fortify_all_issues.json | jq -r '
+                      .data[] | 
+                      {
+                        category: (.subCategoryName // .categoryName // .issueName // .subCategory // .category // .kingdom // "Unknown"),
+                        severity: (.friority // .priority // "Unknown")
+                      } | @tsv' | awk -F'\t' '
+                      {
+                        c[$1, $2]++;
+                        cat[$1]=1;
+                      }
+                      END {
+                        for (k in cat) {
+                          crit = c[k, "Critical"]+0;
+                          high = c[k, "High"]+0;
+                          med  = c[k, "Medium"]+0;
+                          low  = c[k, "Low"]+0;
+                          total = crit+high+med+low;
+                          printf "| %-16s | %-10d | %-8d | %-8d | %-8d | %-13d |\n", k, crit, high, med, low, total;
+                        }
+                      }'
+                    echo "+------------------+----------+----------+----------+----------+---------------+"
                     
                     echo ""
-                    echo "+--------------------------- EXECUTIVE SUMMARY -----------------------+"
-                    echo "| CRITICAL: $critical_count  🔴"
-                    echo "| HIGH:     $high_count      🟠"
-                    echo "| MEDIUM:   $medium_count    🟡"
-                    echo "| LOW:      $low_count       🟢"
-                    echo "|"
-                    echo "| Total Issues Found: $total_count"
-                    ssc_base_url=$(echo "$fortify_ssc_api_url" | sed 's|/api/v1||g')
-                    echo "| Detailed Report: ${ssc_base_url}/html/ssc/version/${fortify_project_version_id}/audit"
-                    echo "+--------------------------------------------------------------------+"
+                    echo "📊 EXECUTIVE SUMMARY:"
+                    echo "+-----------------------------------------+"
+                    echo "| 🔴 CRITICAL: $critical_count"
+                    echo "| 🟠 HIGH: $high_count"
+                    echo "| 🟡 MEDIUM: $medium_count"
+                    echo "| 🔵 LOW: $low_count"
+                    echo "| 📊 Total Issues Found: $total_count"
+                    echo "+-----------------------------------------+"
+                    echo ""
+                    echo "🔗 Detailed Report: ${ssc_base_url}/html/ssc/version/${fortify_project_version_id}/audit"
+                    echo "+-------------------------------------------------------------------------------------------------------------+"
                   }
                   
                   # ========== EXECUÇÃO PRINCIPAL ==========

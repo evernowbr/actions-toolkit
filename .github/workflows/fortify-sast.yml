@@ -261,7 +261,7 @@ jobs:
                         cat[$1]=1;
                       }
                       END {
-                       
+                        sep = "+------------------------------+------------+----------+----------+----------+---------------+";
                         print sep;
                         for (k in cat) {
                           crit = c[k, "Critical"]+0;
@@ -280,21 +280,23 @@ jobs:
                           }
                           print sep;
                         }
+                        print sep;
                       }'
                     echo ""
                     
                     echo "EXECUTIVE SUMMARY:"
                     echo "+-------------------------------+"
-                    printf "| %-10s %3s                 |\n" "CRITICAL:" "$critical_count"
-                    printf "| %-10s %3s                 |\n" "HIGH:" "$high_count"
-                    printf "| %-10s %3s                 |\n" "MEDIUM:" "$medium_count"
-                    printf "| %-10s %3s                 |\n" "LOW:" "$low_count"
-                    printf "| %-18s %3s                 |\n" "TOTAL ISSUES FOUND:" "$total_count"
+                    printf "| %-20s %-5s           |\n" "CRITICAL:" "$critical_count"
+                    printf "| %-20s %-5s           |\n" "HIGH:" "$high_count"
+                    printf "| %-20s %-5s           |\n" "MEDIUM:" "$medium_count"
+                    printf "| %-20s %-5s           |\n" "LOW:" "$low_count"
+                    printf "| %-20s %-5s           |\n" "TOTAL ISSUES FOUND:" "$total_count"
                     echo "+-------------------------------+"
                     echo ""
                     # Garantir link absoluto
                     echo "🔗 Detailed Report: https://fortify-ssc.evernow.com.br/html/ssc/version/${fortify_project_version_id}/audit"
                     echo "+-------------------------------------------------------------------------------------------------------------+"
+                    echo ""
                   }
                   
                   # ========== EXECUÇÃO PRINCIPAL ==========

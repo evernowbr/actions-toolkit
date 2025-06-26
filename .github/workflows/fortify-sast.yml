@@ -186,7 +186,7 @@ jobs:
 
                   gerar_relatorio_fortify() {
                     echo ""
-                    echo "+--------------------- FORTIFY SAST SCAN SUMMARY ---------------------+"
+                    echo "+--------------------- FORTIFY SAST SCAN SUMMARY --------------------+"
                     echo "| Projeto: $fortify_project_name $fortify_version_name"
                     echo "+--------------------------------------------------------------------+"
                     
@@ -198,9 +198,9 @@ jobs:
                     total_count=$(cat /tmp/fortify_total_count 2>/dev/null || echo 0)
                     
                     echo "| Total: $total_count (CRITICAL: $critical_count, HIGH: $high_count, MEDIUM: $medium_count, LOW: $low_count)"
-                    echo "+------------------------------+------------+----------+------------------------------+----------------+-------------------------------+"
-                    echo "| CATEGORY                     | ISSUE ID   | SEVERITY | PRIMARY LOCATION             | TAGGED         | RECOMMENDATIONS               |"
-                    echo "+------------------------------+------------+----------+------------------------------+----------------+-------------------------------+"
+                    echo "+------------------------------+------------+----------+-----------------------------+----------------+-------------------------------+"
+                    echo "| CATEGORY                     | ISSUE ID   | SEVERITY | PRIMARY LOCATION            | TAGGED         | RECOMMENDATIONS               |"
+                    echo "+------------------------------+------------+----------+-----------------------------+----------------+-------------------------------+"
                     
                     # TABELA DETALHADA DE FINDINGS
                     cat /tmp/fortify_all_issues.json 2>/dev/null | jq -r '
@@ -228,7 +228,7 @@ jobs:
                             printf "| %-28s | %-10s | %-8s | %-27s | %-15s | %-29s |\n" "${lines[$i]}" "" "" "" "" ""
                           fi
                         done
-                        echo "+------------------------------+------------+----------+------------------------------+----------------+-------------------------------+"
+                        echo "+------------------------------+------------+----------+-----------------------------+----------------+-------------------------------+"
                     done
                     
                     # BREAKDOWN DETALHADO POR CATEGORIA E SEVERIDADE
@@ -261,7 +261,7 @@ jobs:
                         cat[$1]=1;
                       }
                       END {
-                        sep = "+------------------------------+------------+----------+----------+----------+---------------+";
+                       
                         print sep;
                         for (k in cat) {
                           crit = c[k, "Critical"]+0;
@@ -289,15 +289,11 @@ jobs:
                     printf "| %-10s %3s                 |\n" "HIGH:" "$high_count"
                     printf "| %-10s %3s                 |\n" "MEDIUM:" "$medium_count"
                     printf "| %-10s %3s                 |\n" "LOW:" "$low_count"
-                    printf "| %-18s %3s     |\n" "TOTAL ISSUES FOUND:" "$total_count"
+                    printf "| %-18s %3s                 |\n" "TOTAL ISSUES FOUND:" "$total_count"
                     echo "+-------------------------------+"
                     echo ""
                     # Garantir link absoluto
-                    if [[ -n "$ssc_base_url" ]]; then
-                      echo "🔗 Detailed Report: ${ssc_base_url}/html/ssc/version/${fortify_project_version_id}/audit"
-                    else
-                      echo "🔗 Detailed Report: /html/ssc/version/${fortify_project_version_id}/audit"
-                    fi
+                    echo "🔗 Detailed Report: https://fortify-ssc.evernow.com.br/html/ssc/version/${fortify_project_version_id}/audit"
                     echo "+-------------------------------------------------------------------------------------------------------------+"
                   }
                   

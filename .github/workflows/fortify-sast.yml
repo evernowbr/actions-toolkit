@@ -186,9 +186,9 @@ jobs:
 
                   gerar_relatorio_fortify() {
                     echo ""
-                    echo "+---------------- FORTIFY SAST SCAN SUMMARY ----------------+"
-                    echo "| Projeto: $fortify_project_name Branch: $fortify_version_name"
-                    echo "+----------------------------------------------------------+"
+                    echo "+--------------------- FORTIFY SAST SCAN SUMMARY ---------------------+"
+                    echo "| Projeto: $fortify_project_name Versão: $fortify_version_name"
+                    echo "+---------------------------------------------------------------------+"
                     
                     # Lê contadores salvos
                     critical_count=$(cat /tmp/fortify_critical_count 2>/dev/null || echo 0)
@@ -198,14 +198,11 @@ jobs:
                     total_count=$(cat /tmp/fortify_total_count 2>/dev/null || echo 0)
                     
                     echo "| Total: $total_count (CRITICAL: $critical_count, HIGH: $high_count, MEDIUM: $medium_count, LOW: $low_count)"
-                    echo "+----------------------------------------------------------+"
-                    echo "| CATEGORY                                | ISSUE ID   | SEVERITY | PRIMARY LOCATION                        | RECOMMENDATIONS                          |"
-                    echo "+-----------------------------------------+------------+----------+-----------------------------------------+------------------------------------------+"
+                    echo "+--------------------------------------------------------------------------------------------------------------------+"
+                    echo "| CATEGORY                     | ISSUE ID   | SEVERITY | PRIMARY LOCATION            | RECOMMENDATIONS               |"
+                    echo "+------------------------------+------------+----------+-----------------------------+-------------------------------+"
                     
-                    # Mostra até 10 findings com categoria otimizada - issueName contém o nome detalhado
-                    printf "| %-56s | %-12s | %-13s | %-40s | %-14s | %-32s |\n" "CATEGORY" "ISSUE ID" "SEVERITY" "LOCATION" "TAGGED" "RECOMMENDATION"
-                    printf "|--------------------------------------------------------|--------------|--------------|----------------------------------------|--------------|----------------------------------|\n"
-
+                    # Mostra até 10 findings com layout ajustado e recomendação melhorada
                     cat /tmp/fortify_all_issues.json 2>/dev/null | jq -r '
                       .data | .[0:10] | .[] | [
                         (if .subCategoryName then .subCategoryName
@@ -216,119 +213,28 @@ jobs:
                          elif .kingdom then .kingdom
                          else "Unknown"
                          end),
-                        (.issueInstanceId // (.id | tostring) // "-"),
+                        (.issueInstanceId // (.id | tostring)),
                         (.friority // .priority // "Unknown"),
                         ((.fileName // .primaryLocation // .folderName // "Unknown File") + ":" + ((.lineNumber // "N/A")|tostring)),
-                        (if .customTagValues and (.customTagValues|length)>0 then
-                            ([.customTagValues[] | select(.name == "Tagged") | .value] | .[0] // [.customTagValues[] | .value][0] // "-")
-                         else "-" end),
-                        (.recommendation // .description // "Ver detalhes no SSC")
-                      ] | @tsv' | while IFS=$'\t' read -r category issue severity location tagged recommendation; do
-                        # Fallback para '-'
-                        category="${category:--}"
-                        issue="${issue:--}"
-                        severity="${severity:--}"
-                        location="${location:--}"
-                        tagged="${tagged:--}"
-                        recommendation="${recommendation:--}"
-                        # Trunca campos longos para manter o alinhamento
-                        [ ${#category} -gt 56 ] && category="${category:0:53}..."
-                        [ ${#location} -gt 40 ] && location="${location:0:37}..."
-                        [ ${#recommendation} -gt 32 ] && recommendation="${recommendation:0:29}..."
-                        [ ${#tagged} -gt 14 ] && tagged="${tagged:0:11}..."
-
-                        printf "| %-56s | %-12s | %-13s | %-40s | %-14s | %-32s |\n" \
-                          "$category" "$issue" "$severity" "$location" "$tagged" "$recommendation"
-                        printf "|--------------------------------------------------------|--------------|--------------|----------------------------------------|--------------|----------------------------------|\n"
+                        
+                        (.description // "Ver detalhes no SSC")
+                      ] | @tsv' | while IFS=$'\t' read -r category issue severity location recommendation; do
+                        printf "| %-28s | %-10s | %-8s | %-27s | %-29s |\n" \
+                          "${category:0:28}" "${issue:0:10}" "${severity:0:8}" "${location:0:27}" "${recommendation:0:29}"
                     done
-                    
-                    echo "+----------------------------------------------------------+"
-                    echo "|🔍 DETAILED BREAKDOWN BY CATEGORY:"
-                    echo "+------------------+----------+----------+----------+----------+----------+"
-                    echo "| CATEGORY         | CRITICAL | HIGH     | MEDIUM   | LOW      | TOTAL    |"
-                    echo "+------------------+----------+----------+----------+----------+----------+"
-                    
-                    # Breakdown por categoria com lógica otimizada
-                    cat /tmp/fortify_all_issues.json 2>/dev/null | jq -r '
-                        [.data[] | (if .subCategoryName then .subCategoryName
-                                   elif .categoryName then .categoryName
-                                   elif .issueName then .issueName
-                                   elif .subCategory then .subCategory
-                                   elif .category then .category
-                                   elif .kingdom then .kingdom
-                                   else "Unknown"
-                                   end)] | unique | .[]' | while read -r category; do
-                        
-                        # Conta por categoria usando a mesma lógica
-                        cat_critical=$(cat /tmp/fortify_all_issues.json | jq --arg cat "$category" '
-                            [.data[] | select(
-                                (if .subCategoryName then .subCategoryName
-                                 elif .categoryName then .categoryName
-                                 elif .issueName then .issueName
-                                 elif .subCategory then .subCategory
-                                 elif .category then .category
-                                 elif .kingdom then .kingdom
-                                 else "Unknown"
-                                 end) == $cat and (.friority // .priority) == "Critical"
-                            )] | length')
-                        
-                        cat_high=$(cat /tmp/fortify_all_issues.json | jq --arg cat "$category" '
-                            [.data[] | select(
-                                (if .subCategoryName then .subCategoryName
-                                 elif .categoryName then .categoryName
-                                 elif .issueName then .issueName
-                                 elif .subCategory then .subCategory
-                                 elif .category then .category
-                                 elif .kingdom then .kingdom
-                                 else "Unknown"
-                                 end) == $cat and (.friority // .priority) == "High"
-                            )] | length')
-                        
-                        cat_medium=$(cat /tmp/fortify_all_issues.json | jq --arg cat "$category" '
-                            [.data[] | select(
-                                (if .subCategoryName then .subCategoryName
-                                 elif .categoryName then .categoryName
-                                 elif .issueName then .issueName
-                                 elif .subCategory then .subCategory
-                                 elif .category then .category
-                                 elif .kingdom then .kingdom
-                                 else "Unknown"
-                                 end) == $cat and (.friority // .priority) == "Medium"
-                            )] | length')
-                        
-                        cat_low=$(cat /tmp/fortify_all_issues.json | jq --arg cat "$category" '
-                            [.data[] | select(
-                                (if .subCategoryName then .subCategoryName
-                                 elif .categoryName then .categoryName
-                                 elif .issueName then .issueName
-                                 elif .subCategory then .subCategory
-                                 elif .category then .category
-                                 elif .kingdom then .kingdom
-                                 else "Unknown"
-                                 end) == $cat and (.friority // .priority) == "Low"
-                            )] | length')
-                        
-                        cat_total=$((cat_critical + cat_high + cat_medium + cat_low))
-                        if [ "$cat_total" -gt "0" ]; then
-                            printf "| %-16s | %-8s | %-8s | %-8s | %-8s | %-8s |\n" \
-                                "${category:0:16}" "$cat_critical" "$cat_high" "$cat_medium" "$cat_low" "$cat_total"
-                        fi
-                    done
-                    echo "+------------------+----------+----------+----------+----------+----------+"
+                    echo "+------------------------------+------------+----------+-----------------------------+-------------------------------+"
                     
                     echo ""
-                    echo "+---------------------------------------------------------------------------------+"
-                    echo "|📊 EXECUTIVE SUMMARY:                                                           |"
-                    echo "+---------------------------------------------------------------------------------+"
-                    printf "| 🔴 CRITICAL: %-67s |\n" "$critical_count"
-                    printf "| 🟠 HIGH: %-71s |\n" "$high_count"
-                    printf "| 🟡 MEDIUM: %-69s |\n" "$medium_count"
-                    printf "| 🔵 LOW: %-72s |\n" "$low_count"
-                    echo "|                                                                                 |"
-                    printf "| 📊Total Issues Found: %-58s |\n" "$total_count"
+                    echo "+--------------------------- EXECUTIVE SUMMARY -----------------------+"
+                    echo "|🔴 CRITICAL: $critical_count" 
+                    echo "|🟠 HIGH:     $high_count" 
+                    echo "|🟡 MEDIUM:   $medium_count" 
+                    echo "|⚪ LOW:      $low_count" 
+                    echo "|" 
+                    echo "| Total Issues Found: $total_count" 
                     ssc_base_url=$(echo "$fortify_ssc_api_url" | sed 's|/api/v1||g')
-                    printf "| 🔗 Detailed Report: %-54s |\n" "${ssc_base_url}/html/ssc/version/${fortify_project_version_id}/audit"
-                    echo "+---------------------------------------------------------------------------------+"
+                    echo "| Detailed Report: ${ssc_base_url}/html/ssc/version/${fortify_project_version_id}/audit" 
+                    echo "+--------------------------------------------------------------------+"
                   }
                   
                   # ========== EXECUÇÃO PRINCIPAL ==========
@@ -365,7 +271,7 @@ jobs:
                   fortify_regras_processamento
                   
                   echo "🔧 Executando Scancentral Client"
-                  output=$($fortify_scancentral_tool -ssctoken $fortify_controller_token -url $fortify_controller_url start -skipBuild -block --log-file fortify.log --overwrite -application $fortify_project_name -version $fortify_version_name --upload-to-ssc --ssc-upload-token $fortify_controller_token 2>&1 | tee /dev/stderr )                    
+                  output=$($fortify_scancentral_tool -ssctoken $fortify_controller_token -url $fortify_controller_url start -bt none -skipBuild -block --log-file fortify.log --overwrite -application $fortify_project_name -version $fortify_version_name --upload-to-ssc --ssc-upload-token $fortify_controller_token 2>&1 | tee /dev/stderr )                    
                   
                   # Verifica o código de resposta
                   exit_code=$?

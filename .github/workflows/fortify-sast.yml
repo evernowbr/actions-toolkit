@@ -219,18 +219,23 @@ jobs:
                         (.analysisType // .analysis.analysisType // .analysisName // .analysis // "N/A"),
                         (.description // "Ver detalhes no SSC")
                       ] | @tsv' | while IFS=$'\t' read -r category issue severity location tagged recommendation; do
-                        category_lines=($(echo "$category" | fold -w 28 | head -n 3))
-                        for i in {0..2}; do
-                          if [[ -n "${category_lines[$i]}" ]]; then
-                            if [[ $i -eq 0 ]]; then
-                              printf "| %-28s | %-10s | %-8s | %-27s | %-15s | %-29s |\n" \
-                                "${category_lines[$i]}" "${issue:0:10}" "${severity:0:8}" "${location:0:27}" "${tagged:0:15}" "${recommendation:0:29}"
-                            else
-                              printf "| %-28s | %-10s | %-8s | %-27s | %-15s | %-29s |\n" \
-                                "${category_lines[$i]}" "" "" "" "" ""
-                            fi
-                          fi
-                        done
+                        line1="${category:0:28}"
+                        line2=""
+                        line3=""
+                        if [[ ${#category} -gt 28 ]]; then
+                          line2="${category:28:28}"
+                        fi
+                        if [[ ${#category} -gt 56 ]]; then
+                          line3="${category:56:28}"
+                        fi
+                        printf "| %-28s | %-10s | %-8s | %-27s | %-15s | %-29s |\n" \
+                          "$line1" "${issue:0:10}" "${severity:0:8}" "${location:0:27}" "${tagged:0:15}" "${recommendation:0:29}"
+                        if [[ -n "$line2" ]]; then
+                          printf "| %-28s | %-10s | %-8s | %-27s | %-15s | %-29s |\n" "$line2" "" "" "" "" ""
+                        fi
+                        if [[ -n "$line3" ]]; then
+                          printf "| %-28s | %-10s | %-8s | %-27s | %-15s | %-29s |\n" "$line3" "" "" "" "" ""
+                        fi
                     done
                     echo "+------------------------------+------------+----------+------------------------------+----------------+-------------------------------+"
                     

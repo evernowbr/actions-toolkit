@@ -187,7 +187,7 @@ jobs:
                   gerar_relatorio_fortify() {
                     echo ""
                     echo "+--------------------- FORTIFY SAST SCAN SUMMARY ---------------------+"
-                    echo "| Projeto: $fortify_project_name v$fortify_version_name"
+                    echo "| Projeto: $fortify_project_name $fortify_version_name"
                     echo "+--------------------------------------------------------------------+"
                     
                     # Lê contadores salvos
@@ -198,9 +198,9 @@ jobs:
                     total_count=$(cat /tmp/fortify_total_count 2>/dev/null || echo 0)
                     
                     echo "| Total: $total_count (CRITICAL: $critical_count, HIGH: $high_count, MEDIUM: $medium_count, LOW: $low_count)"
-                    echo "+--------------------------------------------------------------------+"
+                    echo "+------------------------------+------------+----------+------------------------------+----------------+-------------------------------+"
                     echo "| CATEGORY                     | ISSUE ID   | SEVERITY | PRIMARY LOCATION             | TAGGED         | RECOMMENDATIONS               |"
-                    echo "+------------------------------+------------+----------+-----------------------------+----------------+-------------------------------+"
+                    echo "+------------------------------+------------+----------+------------------------------+----------------+-------------------------------+"
                     
                     # Função para quebrar texto em até 3 linhas de 28 caracteres
                     split_lines() {
@@ -233,18 +233,19 @@ jobs:
                         (.issueInstanceId // (.id | tostring)),
                         (.friority // .priority // "Unknown"),
                         ((.fileName // .primaryLocation // .folderName // "Unknown File") + ":" + ((.lineNumber // "N/A")|tostring)),
-                        (if .customAttributes then (.customAttributes[]? | select(.name=="Tagged") | .value // "N/A") else "N/A" end),
+                        (.analysisType // .analysis.analysisType // .analysisName // .analysis // "N/A"),
                         (.description // "Ver detalhes no SSC")
                       ] | @tsv' | while IFS=$'\t' read -r category issue severity location tagged recommendation; do
-                        # Quebra o campo category em até 3 linhas
-                        IFS=$'\n' read -r line1 line2 line3 < <(split_lines "$category" 28 3)
-                        # Primeira linha com todos os campos
-                        printf "| %-28s | %-10s | %-8s | %-27s | %-15s | %-29s |\n" \
-                          "$line1" "${issue:0:10}" "${severity:0:8}" "${location:0:27}" "${tagged:0:15}" "${recommendation:0:29}"
-                        # Linhas seguintes só com category
-                        for extra_line in "$line2" "$line3"; do
-                          if [[ -n "$extra_line" ]]; then
-                            printf "| %-28s | %-10s | %-8s | %-27s | %-15s | %-29s |\n" "$extra_line" "" "" "" "" ""
+                        category_lines=($(echo "$category" | fold -w 28 | head -n 3))
+                        for i in {0..2}; do
+                          if [[ -n "${category_lines[$i]}" ]]; then
+                            if [[ $i -eq 0 ]]; then
+                              printf "| %-28s | %-10s | %-8s | %-27s | %-15s | %-29s |\n" \
+                                "${category_lines[$i]}" "${issue:0:10}" "${severity:0:8}" "${location:0:27}" "${tagged:0:15}" "${recommendation:0:29}"
+                            else
+                              printf "| %-28s | %-10s | %-8s | %-27s | %-15s | %-29s |\n" \
+                                "${category_lines[$i]}" "" "" "" "" ""
+                            fi
                           fi
                         done
                     done
@@ -252,7 +253,7 @@ jobs:
                     
                     echo ""
                     echo "+--------------------------- EXECUTIVE SUMMARY -----------------------+"
-                    echo "| CRITICAL: $critical_count   🔴"
+                    echo "| CRITICAL: $critical_count  🔴"
                     echo "| HIGH:     $high_count      🟠"
                     echo "| MEDIUM:   $medium_count    🟡"
                     echo "| LOW:      $low_count       🟢"

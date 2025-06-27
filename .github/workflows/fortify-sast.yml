@@ -428,6 +428,13 @@ jobs:
                         fi
                     fi
 
+                    # Após gerar o relatório detalhado, salvar findings como artefato
+                    echo "Salvando findings do Fortify como artefato para análise..."
+                    if [ -f /tmp/fortify_all_issues.json ]; then
+                      mkdir -p fortify-artifacts
+                      cp /tmp/fortify_all_issues.json fortify-artifacts/
+                    fi
+
     # process-webhook:
     #     runs-on: self-hosted
     #     name: Fortify Webhook SAST

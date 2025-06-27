@@ -217,7 +217,7 @@ jobs:
                         (.issueInstanceId // (.id | tostring)),
                         (.friority // .priority // "Unknown"),
                         ((.fileName // .primaryLocation // .folderName // "Unknown File") + ":" + ((.lineNumber // "N/A")|tostring)),
-                        (.analysisType // .analysis.analysisType // .analysisName // .analysis // "N/A"),
+                        (.analysisType // .analysis.analysisType // .analysisName // .analysis // (.customAttributes[]? | select(.name=="Tagged") | .value) // (.attributes[]? | select(.name=="Tagged") | .value) // "N/A"),
                         (.description // "Ver detalhes no SSC")
                       ] | @tsv' | while IFS=$'\t' read -r category issue severity location tagged recommendation; do
                         mapfile -t lines < <(echo "$category" | fold -s -w 28 | head -n 3)

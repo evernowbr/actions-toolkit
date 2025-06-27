@@ -280,7 +280,7 @@ jobs:
                           }
                           print sep;
                         }
-                        print sep;
+                        
                       }'
                     echo ""
                     

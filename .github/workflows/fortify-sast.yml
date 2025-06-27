@@ -187,7 +187,7 @@ jobs:
                   gerar_relatorio_fortify() {
                     echo ""
                     echo ""
-                    echo "+--------------------- FORTIFY SAST SCAN SUMMARY --------------------+"
+                    echo "+----------------- 📊 FORTIFY SAST SCAN SUMMARY --------------------+"
                     echo "| Projeto: $fortify_project_name $fortify_version_name"
                     echo "+--------------------------------------------------------------------+"
                     
@@ -234,7 +234,7 @@ jobs:
                     
                     # BREAKDOWN DETALHADO POR CATEGORIA E SEVERIDADE
                     echo ""
-                    echo "DETAILED BREAKDOWN BY CATEGORY:"
+                    echo "🔍 DETAILED BREAKDOWN BY CATEGORY:"
                     echo "+------------------------------+------------+----------+----------+----------+---------------+"
                     echo "| CATEGORY                     | CRITICAL   | HIGH     | MEDIUM   | LOW      | TOTAL ISSUES  |"
                     echo "+------------------------------+------------+----------+----------+----------+---------------+"
@@ -263,7 +263,6 @@ jobs:
                       }
                       END {
                         sep = "+------------------------------+------------+----------+----------+----------+---------------+";
-                        
                         for (k in cat) {
                           crit = c[k, "Critical"]+0;
                           high = c[k, "High"]+0;
@@ -279,19 +278,19 @@ jobs:
                               printf "|   %-26s | %-10s | %-8s | %-8s | %-8s | %-13s |\n", lines[i], "", "", "", "", "";
                             }
                           }
-                          
+                          print sep;
                         }
                         print sep;
                       }'
                     echo ""
                     
-                    echo "EXECUTIVE SUMMARY:"
+                    echo "📊 EXECUTIVE SUMMARY:"
                     echo "+-------------------------------+"
-                    printf "| CRITICAL: %s%*s|\n" "$critical_count" $((27 - ${#critical_count} - 9)) ""
-                    printf "| HIGH:    %s%*s|\n" "$high_count" $((27 - ${#high_count} - 6)) ""
-                    printf "| MEDIUM:  %s%*s|\n" "$medium_count" $((27 - ${#medium_count} - 8)) ""
-                    printf "| LOW:     %s%*s|\n" "$low_count" $((27 - ${#low_count} - 6)) ""
-                    printf "| TOTAL ISSUES FOUND: %s%*s|\n" "$total_count" $((27 - ${#total_count} - 19)) ""
+                    printf "| %-29s|\n" "CRITICAL: $critical_count"
+                    printf "| %-29s|\n" "HIGH:    $high_count"
+                    printf "| %-29s|\n" "MEDIUM:  $medium_count"
+                    printf "| %-29s|\n" "LOW:     $low_count"
+                    printf "| %-29s|\n" "TOTAL ISSUES FOUND: $total_count"
                     echo "+-------------------------------+"
                     echo ""
                     # Garantir link absoluto

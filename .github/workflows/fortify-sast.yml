@@ -186,6 +186,7 @@ jobs:
 
                   gerar_relatorio_fortify() {
                     echo ""
+                    echo ""
                     echo "+--------------------- FORTIFY SAST SCAN SUMMARY --------------------+"
                     echo "| Projeto: $fortify_project_name $fortify_version_name"
                     echo "+--------------------------------------------------------------------+"
@@ -262,7 +263,7 @@ jobs:
                       }
                       END {
                         sep = "+------------------------------+------------+----------+----------+----------+---------------+";
-                        print sep;
+                        
                         for (k in cat) {
                           crit = c[k, "Critical"]+0;
                           high = c[k, "High"]+0;
@@ -278,7 +279,7 @@ jobs:
                               printf "|   %-26s | %-10s | %-8s | %-8s | %-8s | %-13s |\n", lines[i], "", "", "", "", "";
                             }
                           }
-                          print sep;
+                          
                         }
                         print sep;
                       }'

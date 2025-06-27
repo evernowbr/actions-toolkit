@@ -185,8 +185,8 @@ jobs:
                   }
 
                   gerar_relatorio_fortify() {
-                    echo ""
-                    echo ""
+                    echo " "
+                    echo " "
                     echo "+----------------- 📊 FORTIFY SAST SCAN SUMMARY --------------------+"
                     echo "| Projeto: $fortify_project_name $fortify_version_name"
                     echo "+--------------------------------------------------------------------+"
@@ -233,7 +233,7 @@ jobs:
                     done
                     
                     # BREAKDOWN DETALHADO POR CATEGORIA E SEVERIDADE
-                    echo ""
+                    echo " "
                     echo "🔍 DETAILED BREAKDOWN BY CATEGORY:"
                     echo "+------------------------------+------------+----------+----------+----------+---------------+"
                     echo "| CATEGORY                     | CRITICAL   | HIGH     | MEDIUM   | LOW      | TOTAL ISSUES  |"
@@ -282,8 +282,7 @@ jobs:
                         }
                         
                       }'
-                    echo ""
-                    
+                    echo " "
                     echo "📊 EXECUTIVE SUMMARY:"
                     echo "+-------------------------------+"
                     printf "| %-29s|\n" "CRITICAL: $critical_count"
@@ -292,11 +291,11 @@ jobs:
                     printf "| %-29s|\n" "LOW:     $low_count"
                     printf "| %-29s|\n" "TOTAL ISSUES FOUND: $total_count"
                     echo "+-------------------------------+"
-                    echo ""
+                    echo " "
                     # Garantir link absoluto
                     echo "🔗 Detailed Report: https://fortify-ssc.evernow.com.br/html/ssc/version/${fortify_project_version_id}/audit"
                     echo "+-------------------------------------------------------------------------------------------------------------+"
-                    echo ""
+                    echo " "
                   }
                   
                   # ========== EXECUÇÃO PRINCIPAL ==========

@@ -71,12 +71,12 @@ jobs:
             -i /work/results.fpr -o /work/results.sarif
 
       - name: 📤 Upload SARIF como artefato
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: fortify-sast-sarif
           path: results.sarif
 
       - name: 📡 Upload SARIF para Code Scanning
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: results.sarif

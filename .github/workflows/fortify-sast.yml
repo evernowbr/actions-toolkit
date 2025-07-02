@@ -242,17 +242,55 @@ jobs:
                           return 1
                       fi
                       
+                      # Verifica se o scan está completo
+                      echo "🔍 Verificando status do scan..."
+                      scan_status_response=$(curl -sS -k -X GET --header 'Content-Type: application/json' \
+                          --header 'Accept: application/json' \
+                          --header "Authorization: FortifyToken $fortify_unified_login_token" \
+                          "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id")
+                      exit_code=$?
+                      
+                      if [ "$exit_code" == "0" ]; then
+                          scan_status=$(echo "$scan_status_response" | jq -r '.data.status // "UNKNOWN"')
+                          echo "📊 Status do scan: $scan_status"
+                          
+                          if [ "$scan_status" == "REQUIRES_AUTH" ] || [ "$scan_status" == "PROCESSING" ]; then
+                              echo "⏳ Scan ainda em processamento..."
+                              return 1
+                          fi
+                      fi
+                      
                       # Busca TODAS as vulnerabilidades (sem filtro de severidade)
+                      echo "🔍 Buscando vulnerabilidades..."
                       all_issues_response=$(curl -sS -k -X GET --header 'Content-Type: application/json' \
                           --header 'Accept: application/json' \
                           --header "Authorization: FortifyToken $fortify_unified_login_token" \
                           "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/issues?limit=1000")
                       exit_code=$?
-                      fortify_verificar_resposta_api
+                      
+                      # Verifica se a API retornou erro
+                      if [ "$exit_code" != "0" ]; then
+                          echo "❌ Erro ao consultar vulnerabilidades: $exit_code"
+                          return 1
+                      fi
                       
                       # Verifica se a resposta tem dados válidos
                       if [ -z "$all_issues_response" ] || [ "$all_issues_response" = "null" ]; then
-                          echo "⚠️ Nenhum dado de vulnerabilidade retornado pela API. Pode ser que o scan ainda esteja processando."
+                          echo "⚠️ Nenhum dado de vulnerabilidade retornado pela API."
+                          return 1
+                      fi
+                      
+                      # Verifica se há erro na resposta JSON
+                      error_message=$(echo "$all_issues_response" | jq -r '.message // empty')
+                      if [ -n "$error_message" ]; then
+                          echo "❌ Erro da API: $error_message"
+                          return 1
+                      fi
+                      
+                      # Verifica se há dados na resposta
+                      data_count=$(echo "$all_issues_response" | jq '.data | length' 2>/dev/null || echo "0")
+                      if [ "$data_count" == "0" ]; then
+                          echo "⚠️ Nenhuma vulnerabilidade encontrada no scan atual."
                           echo "0" > /tmp/fortify_total_count
                           echo "0" > /tmp/fortify_critical_count  
                           echo "0" > /tmp/fortify_high_count
@@ -261,6 +299,8 @@ jobs:
                           echo '{"data":[]}' > /tmp/fortify_all_issues.json
                           return 0
                       fi
+                      
+                      echo "✅ Encontradas $data_count vulnerabilidades para processamento"
                       
                       # Salva os dados para análise
                       echo "$all_issues_response" > /tmp/fortify_all_issues.json
@@ -452,10 +492,37 @@ jobs:
                       echo "✅ Arquivos para scan enviados com sucesso. ID do Scan: $fortify_job_token"
                   fi
                     
-                  # ========== GERA RELATÓRIO DETALHADO ANTES DO GATE ==========
-                  echo ""
-                  echo "⏳ Aguardando finalização do scan para gerar relatório detalhado..."
-                  sleep 60  # Aguarda o scan processar (aumentado para 60s)
+                                      # ========== GERA RELATÓRIO DETALHADO ANTES DO GATE ==========
+                    echo ""
+                    echo "⏳ Aguardando finalização do scan para gerar relatório detalhado..."
+                    
+                    # Aguarda o scan processar com retry inteligente
+                    max_retries=5
+                    retry_count=0
+                    while [ $retry_count -lt $max_retries ]; do
+                        echo "🔄 Tentativa $((retry_count + 1))/$max_retries - Aguardando processamento..."
+                        sleep 30  # Aguarda 30s entre tentativas
+                        
+                        # Tenta extrair dados
+                        if fortify_extrair_estatisticas_completas; then
+                            # Verifica se há dados válidos
+                            if [ -f /tmp/fortify_all_issues.json ]; then
+                                data_count=$(cat /tmp/fortify_all_issues.json | jq '.data | length' 2>/dev/null || echo "0")
+                                if [ "$data_count" -gt 0 ]; then
+                                    echo "✅ Dados extraídos com sucesso: $data_count vulnerabilidades encontradas"
+                                    break
+                                else
+                                    echo "⚠️ Scan ainda processando... (0 vulnerabilidades encontradas)"
+                                fi
+                            fi
+                        fi
+                        
+                        retry_count=$((retry_count + 1))
+                    done
+                    
+                    if [ $retry_count -eq $max_retries ]; then
+                        echo "⚠️ Timeout: Scan pode ainda estar processando. Continuando com dados disponíveis..."
+                    fi
                     
                   # Extrai estatísticas completas
                   if fortify_extrair_estatisticas_completas; then
@@ -554,6 +621,50 @@ jobs:
                       echo "💡 Para upload automático, adicione o step 'github/codeql-action/upload-sarif@v3' no workflow"
                   fi
 
+            # ========== UPLOAD DE ARTEFATOS ==========
+            - name: Verificar conteúdo do SARIF
+              run: |
+                  echo "🔍 Verificando conteúdo do arquivo SARIF..."
+                  if [ -f fortify-artifacts/fortify-sast-results.sarif ]; then
+                      sarif_count=$(cat fortify-artifacts/fortify-sast-results.sarif | jq '.runs[0].results | length' 2>/dev/null || echo "0")
+                      echo "📊 SARIF contém $sarif_count vulnerabilidades"
+                      
+                      if [ "$sarif_count" -gt 0 ]; then
+                          echo "✅ SARIF válido com $sarif_count findings"
+                      else
+                          echo "⚠️ SARIF gerado mas sem vulnerabilidades - pode ser que o scan ainda esteja processando"
+                          echo "📄 Verificando arquivo JSON original..."
+                          if [ -f /tmp/fortify_all_issues.json ]; then
+                              json_count=$(cat /tmp/fortify_all_issues.json | jq '.data | length' 2>/dev/null || echo "0")
+                              echo "📊 JSON original contém $json_count vulnerabilidades"
+                          fi
+                      fi
+                  else
+                      echo "❌ Arquivo SARIF não encontrado"
+                  fi
+
+            - name: Upload Fortify SARIF artifact
+              uses: actions/upload-artifact@v4
+              with:
+                name: fortify-sarif
+                path: fortify-artifacts/fortify-sast-results.sarif
+                if-no-files-found: warn
+              if: always()
+
+            - name: Upload Fortify artifacts directory
+              uses: actions/upload-artifact@v4
+              with:
+                name: fortify-artifacts
+                path: fortify-artifacts/
+                if-no-files-found: warn
+              if: always()
+
+            - name: Upload SARIF to GitHub Code Scanning
+              uses: github/codeql-action/upload-sarif@v3
+              with:
+                sarif_file: fortify-artifacts/fortify-sast-results.sarif
+              if: always() && steps.scan.outcome == 'success'
+
     # process-webhook:
     #     runs-on: self-hosted
     #     name: Fortify Webhook SAST
@@ -574,28 +685,3 @@ jobs:
     #           echo "📅 Data do Evento: ${{ github.event.client_payload.triggeredAt }}"
     #           echo "🔗 Fortify SSC URL: ${{ github.event.client_payload.sscUrl }}"
     #           echo "🆔 Webhook ID: ${{ github.event.client_payload.webHookId }}"
-
-# ========== EXEMPLO DE INTEGRAÇÃO SARIF COM GITHUB CODE SCANNING ==========
-# Para habilitar o upload automático do SARIF para GitHub Code Scanning,
-# adicione o seguinte step após o job de scan:
-#
-# - name: Upload SARIF to GitHub Code Scanning
-#   uses: github/codeql-action/upload-sarif@v3
-#   with:
-#     sarif_file: fortify-artifacts/fortify-sast-results.sarif
-#   if: always() && steps.scan.outcome == 'success'
-#
-# Benefícios desta integração:
-# - Findings aparecem na aba "Security" do repositório
-# - Alertas automáticos em Pull Requests
-# - Integração com GitHub Advanced Security
-# - Visualização direta na IDE via extensões SARIF
-# - Histórico de vulnerabilidades por commit
-#
-# ========== FLUXO COMPLETO PARA DESENVOLVEDORES ==========
-# 1. Pipeline executa Fortify SAST
-# 2. SARIF é gerado automaticamente
-# 3. Upload para GitHub Code Scanning
-# 4. Dev vê alertas na IDE ou GitHub
-# 5. Correções são feitas diretamente no código
-# 6. Próximo scan valida as correções

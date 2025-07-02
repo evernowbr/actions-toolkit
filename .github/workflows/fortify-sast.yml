@@ -129,7 +129,110 @@ jobs:
                   # - Resumo executivo com recomendações
                   # - Compatível com diferentes versões da API (friority/priority)
                   # - Tratamento robusto de erros e valores ausentes
-                  
+                  # - Geração de relatório SARIF para integração com IDEs
+
+                  fortify_gerar_sarif() {
+                      echo "📋 Gerando relatório SARIF para integração com IDEs..."
+                      
+                      # Verifica se temos dados para converter
+                      if [ ! -f /tmp/fortify_all_issues.json ]; then
+                          echo "⚠️ Nenhum dado de vulnerabilidade encontrado para gerar SARIF"
+                          return 1
+                      fi
+                      
+                      # Cria diretório para artefatos
+                      mkdir -p fortify-artifacts
+                      
+                      # Gera SARIF a partir dos dados do Fortify
+                      cat /tmp/fortify_all_issues.json | jq -r '
+                      {
+                          "$schema": "https://schemastore.azurewebsites.net/schemas/json/sarif-2.1.0-rtm.5.json",
+                          "version": "2.1.0",
+                          "runs": [
+                              {
+                                  "tool": {
+                                      "driver": {
+                                          "name": "Fortify Static Code Analyzer",
+                                          "version": "25.2.0",
+                                          "informationUri": "https://www.microfocus.com/en-us/cyberres/application-security/static-code-analyzer",
+                                          "rules": []
+                                      }
+                                  },
+                                  "invocations": [
+                                      {
+                                          "executionSuccessful": true,
+                                          "commandLine": "scancentral",
+                                          "startTimeUtc": "'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'",
+                                          "endTimeUtc": "'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'"
+                                      }
+                                  ],
+                                  "results": [
+                                      .data[] | {
+                                          "ruleId": (.subCategoryName // .categoryName // .issueName // .subCategory // .category // .kingdom // "Unknown"),
+                                          "level": (
+                                              if (.friority // .priority) == "Critical" then "error"
+                                              elif (.friority // .priority) == "High" then "error"
+                                              elif (.friority // .priority) == "Medium" then "warning"
+                                              elif (.friority // .priority) == "Low" then "note"
+                                              else "note"
+                                              end
+                                          ),
+                                          "message": {
+                                              "text": (.description // .issueName // "Vulnerabilidade detectada pelo Fortify")
+                                          },
+                                          "locations": [
+                                              {
+                                                  "physicalLocation": {
+                                                      "artifactLocation": {
+                                                          "uri": (.fileName // .primaryLocation // .folderName // "Unknown File")
+                                                      },
+                                                      "region": {
+                                                          "startLine": (.lineNumber // 1),
+                                                          "startColumn": 1,
+                                                          "endLine": (.lineNumber // 1),
+                                                          "endColumn": 1
+                                                      }
+                                                  }
+                                              }
+                                          ],
+                                          "properties": {
+                                              "fortify_severity": (.friority // .priority // "Unknown"),
+                                              "fortify_category": (.subCategoryName // .categoryName // .issueName // .subCategory // .category // .kingdom // "Unknown"),
+                                              "fortify_issue_id": (.issueInstanceId // (.id | tostring)),
+                                              "fortify_analysis_type": (.analysisType // .analysis.analysisType // .analysisName // .analysis // "N/A"),
+                                              "fortify_tagged": (.customAttributes[]? | select(.name=="Tagged") | .value // .attributes[]? | select(.name=="Tagged") | .value // "N/A"),
+                                              "fortify_project": "'$fortify_project_name'",
+                                              "fortify_version": "'$fortify_version_name'",
+                                              "fortify_project_id": "'$fortify_project_id'",
+                                              "fortify_version_id": "'$fortify_project_version_id'"
+                                          }
+                                      }
+                                  ]
+                              }
+                          ]
+                      }' > fortify-artifacts/fortify-sast-results.sarif
+                      
+                      # Verifica se o SARIF foi gerado com sucesso
+                      if [ -f fortify-artifacts/fortify-sast-results.sarif ]; then
+                          sarif_count=$(cat fortify-artifacts/fortify-sast-results.sarif | jq '.runs[0].results | length')
+                          echo "✅ SARIF gerado com sucesso: $sarif_count vulnerabilidades convertidas"
+                          echo "📁 Arquivo: fortify-artifacts/fortify-sast-results.sarif"
+                          
+                          # Exibe informações sobre o SARIF gerado
+                          echo "📊 Resumo do SARIF:"
+                          echo "   - Formato: SARIF 2.1.0"
+                          echo "   - Ferramenta: Fortify Static Code Analyzer"
+                          echo "   - Projeto: $fortify_project_name"
+                          echo "   - Versão: $fortify_version_name"
+                          echo "   - Total de findings: $sarif_count"
+                          
+                          return 0
+                      else
+                          echo "❌ Falha ao gerar arquivo SARIF"
+                          return 1
+                      fi
+                  }
+
                   fortify_extrair_estatisticas_completas() {
                       echo "📊 Extraindo estatísticas completas de vulnerabilidades..."
                       
@@ -354,16 +457,25 @@ jobs:
                     echo "⏳ Aguardando finalização do scan para gerar relatório detalhado..."
                     sleep 60  # Aguarda o scan processar (aumentado para 60s)
                     
-                    # Extrai estatísticas completas
-                    if fortify_extrair_estatisticas_completas; then
-                        # Gera relatório visual apenas se a extração foi bem-sucedida
-                        echo ""
-                        echo "📊 GERANDO RELATÓRIO DETALHADO:"
-                        gerar_relatorio_fortify
-                    else
-                        echo "⚠️ Não foi possível extrair dados de vulnerabilidades para gerar relatório detalhado."
-                        echo "   O gate de qualidade ainda será aplicado normalmente."
-                    fi
+                        # Extrai estatísticas completas
+    if fortify_extrair_estatisticas_completas; then
+        # Gera relatório visual apenas se a extração foi bem-sucedida
+        echo ""
+        echo "📊 GERANDO RELATÓRIO DETALHADO:"
+        gerar_relatorio_fortify
+        
+        # Gera relatório SARIF para integração com IDEs
+        echo ""
+        echo "🔗 GERANDO RELATÓRIO SARIF:"
+        if fortify_gerar_sarif; then
+            echo "✅ SARIF gerado com sucesso para integração com IDEs"
+        else
+            echo "⚠️ Não foi possível gerar SARIF, mas o relatório detalhado foi criado"
+        fi
+    else
+        echo "⚠️ Não foi possível extrair dados de vulnerabilidades para gerar relatório detalhado."
+        echo "   O gate de qualidade ainda será aplicado normalmente."
+    fi
                     
                     echo "⚙️ Iniciando processamento das regras de gate para o projeto."
                     
@@ -434,6 +546,13 @@ jobs:
                       mkdir -p fortify-artifacts
                       cp /tmp/fortify_all_issues.json fortify-artifacts/
                     fi
+                    
+                    # Upload do SARIF para GitHub Code Scanning (se disponível)
+                    if [ -f fortify-artifacts/fortify-sast-results.sarif ]; then
+                        echo "📤 Preparando upload do SARIF para GitHub Code Scanning..."
+                        echo "🔗 O arquivo SARIF está disponível em: fortify-artifacts/fortify-sast-results.sarif"
+                        echo "💡 Para upload automático, adicione o step 'github/codeql-action/upload-sarif@v3' no workflow"
+                    fi
 
     # process-webhook:
     #     runs-on: self-hosted
@@ -455,3 +574,28 @@ jobs:
     #           echo "📅 Data do Evento: ${{ github.event.client_payload.triggeredAt }}"
     #           echo "🔗 Fortify SSC URL: ${{ github.event.client_payload.sscUrl }}"
     #           echo "🆔 Webhook ID: ${{ github.event.client_payload.webHookId }}"
+
+# ========== EXEMPLO DE INTEGRAÇÃO SARIF COM GITHUB CODE SCANNING ==========
+# Para habilitar o upload automático do SARIF para GitHub Code Scanning,
+# adicione o seguinte step após o job de scan:
+#
+# - name: Upload SARIF to GitHub Code Scanning
+#   uses: github/codeql-action/upload-sarif@v3
+#   with:
+#     sarif_file: fortify-artifacts/fortify-sast-results.sarif
+#   if: always() && steps.scan.outcome == 'success'
+#
+# Benefícios desta integração:
+# - Findings aparecem na aba "Security" do repositório
+# - Alertas automáticos em Pull Requests
+# - Integração com GitHub Advanced Security
+# - Visualização direta na IDE via extensões SARIF
+# - Histórico de vulnerabilidades por commit
+#
+# ========== FLUXO COMPLETO PARA DESENVOLVEDORES ==========
+# 1. Pipeline executa Fortify SAST
+# 2. SARIF é gerado automaticamente
+# 3. Upload para GitHub Code Scanning
+# 4. Dev vê alertas na IDE ou GitHub
+# 5. Correções são feitas diretamente no código
+# 6. Próximo scan valida as correções

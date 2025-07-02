@@ -185,9 +185,10 @@ jobs:
                   }
 
                   gerar_relatorio_fortify() {
-                    echo ""
-                    echo "+--------------------- FORTIFY SAST SCAN SUMMARY ---------------------+"
-                    echo "| Projeto: $fortify_project_name v$fortify_version_name"
+                    echo " "
+                    echo " "
+                    echo "+----------------- 📊 FORTIFY SAST SCAN SUMMARY --------------------+"
+                    echo "| Projeto: $fortify_project_name $fortify_version_name"
                     echo "+--------------------------------------------------------------------+"
                     
                     # Lê contadores salvos
@@ -198,11 +199,11 @@ jobs:
                     total_count=$(cat /tmp/fortify_total_count 2>/dev/null || echo 0)
                     
                     echo "| Total: $total_count (CRITICAL: $critical_count, HIGH: $high_count, MEDIUM: $medium_count, LOW: $low_count)"
-                    echo "+--------------------------------------------------------------------+"
-                    echo "| CATEGORY                     | ISSUE ID   | SEVERITY | PRIMARY LOCATION             | RECOMMENDATIONS               |"
-                    echo "+------------------------------+------------+----------+-----------------------------+-------------------------------+"
+                    echo "+------------------------------+------------+----------+-----------------------------+----------------+-------------------------------+"
+                    echo "| CATEGORY                     | ISSUE ID   | SEVERITY | PRIMARY LOCATION            | TAGGED         | RECOMMENDATIONS               |"
+                    echo "+------------------------------+------------+----------+-----------------------------+----------------+-------------------------------+"
                     
-                    # Mostra até 10 findings com layout ajustado e recomendação melhorada
+                    # TABELA DETALHADA DE FINDINGS
                     cat /tmp/fortify_all_issues.json 2>/dev/null | jq -r '
                       .data | .[0:10] | .[] | [
                         (if .subCategoryName then .subCategoryName
@@ -216,24 +217,85 @@ jobs:
                         (.issueInstanceId // (.id | tostring)),
                         (.friority // .priority // "Unknown"),
                         ((.fileName // .primaryLocation // .folderName // "Unknown File") + ":" + ((.lineNumber // "N/A")|tostring)),
+                        (.analysisType // .analysis.analysisType // .analysisName // .analysis // (.customAttributes[]? | select(.name=="Tagged") | .value) // (.attributes[]? | select(.name=="Tagged") | .value) // "N/A"),
                         (.description // "Ver detalhes no SSC")
-                      ] | @tsv' | while IFS=$'\t' read -r category issue severity location recommendation; do
-                        printf "| %-28s | %-10s | %-8s | %-27s | %-29s |\n" \
-                          "${category:0:28}" "${issue:0:10}" "${severity:0:8}" "${location:0:27}" "${recommendation:0:29}"
+                      ] | @tsv' | while IFS=$'\t' read -r category issue severity location tagged recommendation; do
+                        mapfile -t lines < <(echo "$category" | fold -s -w 28 | head -n 3)
+                        for i in "${!lines[@]}"; do
+                          if [[ $i -eq 0 ]]; then
+                            printf "| %-28s | %-10s | %-8s | %-27s | %-15s | %-29s |\n" \
+                              "${lines[$i]}" "${issue:0:10}" "${severity:0:8}" "${location:0:27}" "${tagged:0:15}" "${recommendation:0:29}"
+                          else
+                            printf "| %-28s | %-10s | %-8s | %-27s | %-15s | %-29s |\n" "${lines[$i]}" "" "" "" "" ""
+                          fi
+                        done
+                        echo "+------------------------------+------------+----------+-----------------------------+----------------+-------------------------------+"
                     done
-                    echo "+------------------------------+------------+----------+-----------------------------+-------------------------------+"
                     
-                    echo ""
-                    echo "+--------------------------- EXECUTIVE SUMMARY -----------------------+"
-                    echo "| CRITICAL: $critical_count" 
-                    echo "| HIGH:     $high_count" 
-                    echo "| MEDIUM:   $medium_count" 
-                    echo "| LOW:      $low_count" 
-                    echo "|" 
-                    echo "| Total Issues Found: $total_count" 
-                    ssc_base_url=$(echo "$fortify_ssc_api_url" | sed 's|/api/v1||g')
-                    echo "| Detailed Report: ${ssc_base_url}/html/ssc/version/${fortify_project_version_id}/audit" 
-                    echo "+--------------------------------------------------------------------+"
+                    # BREAKDOWN DETALHADO POR CATEGORIA E SEVERIDADE
+                    echo " "
+                    echo "🔍 DETAILED BREAKDOWN BY CATEGORY:"
+                    echo "+------------------------------+------------+----------+----------+----------+---------------+"
+                    echo "| CATEGORY                     | CRITICAL   | HIGH     | MEDIUM   | LOW      | TOTAL ISSUES  |"
+                    echo "+------------------------------+------------+----------+----------+----------+---------------+"
+                    
+                    cat /tmp/fortify_all_issues.json | jq -r '
+                      .data[] | 
+                      [(.subCategoryName // .categoryName // .issueName // .subCategory // .category // .kingdom // "Unknown"), (.friority // .priority // "Unknown")] | @tsv' | awk -F'\t' '
+                      function wrap(str, width, arr, n, out, i, len) {
+                        n = split(str, arr, " ");
+                        out = arr[1];
+                        len = length(arr[1]);
+                        for (i=2; i<=n; i++) {
+                          if (len + 1 + length(arr[i]) > width) {
+                            out = out "\n" arr[i];
+                            len = length(arr[i]);
+                          } else {
+                            out = out " " arr[i];
+                            len += 1 + length(arr[i]);
+                          }
+                        }
+                        return out;
+                      }
+                      {
+                        c[$1, $2]++;
+                        cat[$1]=1;
+                      }
+                      END {
+                        sep = "+------------------------------+------------+----------+----------+----------+---------------+";
+                        for (k in cat) {
+                          crit = c[k, "Critical"]+0;
+                          high = c[k, "High"]+0;
+                          med  = c[k, "Medium"]+0;
+                          low  = c[k, "Low"]+0;
+                          total = crit+high+med+low;
+                          wrapped = wrap(k, 28);
+                          n = split(wrapped, lines, "\n");
+                          for (i=1; i<=n; i++) {
+                            if (i==1) {
+                              printf "| %-28s | %-10s | %-8s | %-8s | %-8s | %-13s |\n", lines[i], crit, high, med, low, total;
+                            } else {
+                              printf "|   %-26s | %-10s | %-8s | %-8s | %-8s | %-13s |\n", lines[i], "", "", "", "", "";
+                            }
+                          }
+                          print sep;
+                        }
+                        
+                      }'
+                    echo " "
+                    echo "📊 EXECUTIVE SUMMARY:"
+                    echo "+-------------------------------+"
+                    printf "| %-29s|\n" "CRITICAL: $critical_count"
+                    printf "| %-29s|\n" "HIGH:    $high_count"
+                    printf "| %-29s|\n" "MEDIUM:  $medium_count"
+                    printf "| %-29s|\n" "LOW:     $low_count"
+                    printf "| %-29s|\n" "TOTAL ISSUES FOUND: $total_count"
+                    echo "+-------------------------------+"
+                    echo " "
+                    # Garantir link absoluto
+                    echo "🔗 Detailed Report: https://fortify-ssc.evernow.com.br/html/ssc/version/${fortify_project_version_id}/audit"
+                    echo "+-------------------------------------------------------------------------------------------------------------+"
+                    echo " "
                   }
                   
                   # ========== EXECUÇÃO PRINCIPAL ==========
@@ -364,6 +426,13 @@ jobs:
                             echo '/ (_ // _ `// __// -_) / ___// _ `/(_-< (_-< '
                             echo '\___/ \_,_/ \__/ \__/ /_/    \_,_//___//___/ '
                         fi
+                    fi
+
+                    # Após gerar o relatório detalhado, salvar findings como artefato
+                    echo "Salvando findings do Fortify como artefato para análise..."
+                    if [ -f /tmp/fortify_all_issues.json ]; then
+                      mkdir -p fortify-artifacts
+                      cp /tmp/fortify_all_issues.json fortify-artifacts/
                     fi
 
     # process-webhook:

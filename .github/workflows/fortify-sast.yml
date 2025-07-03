@@ -51,9 +51,17 @@ jobs:
                   source ~/.bashrc
 
                   fortify_verificar_resposta_api() {
+                      # Valida se a resposta é JSON válido antes de processar
+                      if ! echo "$response" | jq -e . >/dev/null 2>&1; then
+                          echo "❌ Resposta não é JSON válido. Conteúdo recebido:"
+                          echo "$response" | head -20
+                          echo "❌ Exit code: $exit_code"
+                          exit 1
+                      fi
+                      
                       if [ "$exit_code" == "0" ] || [ "$exit_code" == "" ]; then
-                          responseCode=$(echo "$response" | jq '.responseCode')
-                          if [ "$responseCode" != "200" ] && [ "$responseCode" != "201" ]; then
+                          responseCode=$(echo "$response" | jq -r '.responseCode // empty')
+                          if [ -n "$responseCode" ] && [ "$responseCode" != "200" ] && [ "$responseCode" != "201" ]; then
                               echo "❌ Código de retorno diferente de 200: API retornou código $responseCode"
                               echo "❌ Resposta da API: $response"
                               exit 1
@@ -75,11 +83,24 @@ jobs:
                   fortify_criar_projeto_e_versao() {
                       # Cria um projeto e uma versão novos
                       fortify_project_parameters='{"project":{"name":"'$fortify_project_name'"},"issueTemplateId":"Prioritized-HighRisk-Project-Template","name":"'$fortify_version_name'","customTagValuesAutoApply":true,"autoPredict":true,"predictionPolicy":"LAB Fortify Policy"}'
-                      response=$(curl -sS -k -X POST --header "Content-Type: application/json" --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/projectVersions" -d "$fortify_project_parameters")
-                      exit_code=$?
+                      response=$(curl -sS -k -L --fail \
+                          -H "Content-Type: application/json" \
+                          -H "Accept: application/json" \
+                          -H "Authorization: FortifyToken $fortify_unified_login_token" \
+                          -d "$fortify_project_parameters" \
+                          "$fortify_ssc_api_url/projectVersions") \
+                          || exit_code=$?
+                      
+                      # Valida se a resposta é JSON válido
+                      if ! echo "$response" | jq -e . >/dev/null 2>&1; then
+                          echo "❌ Resposta não é JSON válido ao criar projeto:"
+                          echo "$response" | head -20
+                          exit 1
+                      fi
+                      
                       fortify_verificar_resposta_api
-                      fortify_project_id=$(echo "$response" | jq '.data.project.id')
-                      fortify_project_version_id=$(echo "$response" | jq '.data.id')
+                      fortify_project_id=$(echo "$response" | jq -r '.data.project.id')
+                      fortify_project_version_id=$(echo "$response" | jq -r '.data.id')
                       echo "✅ Projeto $fortify_project_name criado com ID $fortify_project_id."
                       echo "✅ Versão $fortify_version_name criada com ID $fortify_project_version_id."
                   }
@@ -87,20 +108,46 @@ jobs:
                   fortify_criar_versao() {
                       # Cria uma versão para um projeto já existente
                       fortify_project_parameters='{"project":{"name":"'$fortify_project_name'","id":"'$fortify_project_id'"},"issueTemplateId":"Prioritized-HighRisk-Project-Template","name": "'$fortify_version_name'"}'
-                      response=$(curl -sS -k -X POST --header "Content-Type: application/json" --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/projectVersions" -d "$fortify_project_parameters")
-                      exit_code=$?
+                      response=$(curl -sS -k -L --fail \
+                          -H "Content-Type: application/json" \
+                          -H "Accept: application/json" \
+                          -H "Authorization: FortifyToken $fortify_unified_login_token" \
+                          -d "$fortify_project_parameters" \
+                          "$fortify_ssc_api_url/projectVersions") \
+                          || exit_code=$?
+                      
+                      # Valida se a resposta é JSON válido
+                      if ! echo "$response" | jq -e . >/dev/null 2>&1; then
+                          echo "❌ Resposta não é JSON válido ao criar versão:"
+                          echo "$response" | head -20
+                          exit 1
+                      fi
+                      
                       fortify_verificar_resposta_api
-                      fortify_project_version_id=$(echo "$response" | jq '.data.id')
+                      fortify_project_version_id=$(echo "$response" | jq -r '.data.id')
                       echo "✅ Versão $fortify_version_name criada com ID $fortify_project_version_id."
                   }
 
                   fortify_configurar_projeto() {
                       # Configurar parâmetros adicionais do projeto
                       fortify_parametros='{"requests":[{"uri":"'$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/attributes'","httpVerb":"PUT","postData":[{"values":[{"guid":"New"}],"attributeDefinitionId":5},{"values":[{"guid":"Internal"}],"attributeDefinitionId":6},{"values":[{"guid":"internalnetwork"}],"attributeDefinitionId":7}]},{"uri":"'$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/authEntities'","httpVerb":"PUT","postData":[]},{"uri":"'$fortify_ssc_api_url/projectVersions/$fortify_project_version_id?hideProgress=true'","httpVerb":"PUT","postData":{"committed":true}}]}'
-                      response=$(curl -sS -k -X POST --header "Content-Type: application/json" --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/bulk" -d "$fortify_parametros")
-                      exit_code=$?
+                      response=$(curl -sS -k -L --fail \
+                          -H "Content-Type: application/json" \
+                          -H "Accept: application/json" \
+                          -H "Authorization: FortifyToken $fortify_unified_login_token" \
+                          -d "$fortify_parametros" \
+                          "$fortify_ssc_api_url/bulk") \
+                          || exit_code=$?
+                      
+                      # Valida se a resposta é JSON válido
+                      if ! echo "$response" | jq -e . >/dev/null 2>&1; then
+                          echo "❌ Resposta não é JSON válido ao configurar projeto:"
+                          echo "$response" | head -20
+                          exit 1
+                      fi
+                      
                       fortify_verificar_resposta_api
-                      successCount=$(echo "$response" | jq '.successCount')
+                      successCount=$(echo "$response" | jq -r '.successCount')
                       if [ "$successCount" != "3" ]; then
                           echo "❌ Parâmetros adicionais do projeto $fortify_project_name configurados sem sucesso."
                           echo "❌ Código de retorno diferente de 200: API retornou código $exit_code"
@@ -113,8 +160,22 @@ jobs:
 
                   fortify_regras_processamento() {
                       # Definir regras de processamento de resultados
-                      response=$(curl -sS -k -X PUT --header "Content-Type: application/json" --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/resultProcessingRules" -d '[{"identifier": "com.fortify.manager.BLL.processingrules.BuildProjectProcessingRule","displayName": "Require approval if the Build Project is different between scans","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.FileCountProcessingRule","displayName": "Require approval if file count differs by more than 10%","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.LOCCountProcessingRule","displayName": "Require approval if line count differs by more than 10%","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.NewerEngineVersionProcessingRule","displayName": "Require approval if the engine version of a scan is newer than the engine version of the previous scan","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.RulePackVersionProcessingRule","displayName": "Require approval if the rulepacks used in the scan do not match the rulepacks used in the previous scan","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.WarningProcessingRule","displayName": "Require approval if result has analysis warnings","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.ExternalListVersionProcessingRule","displayName": "Check external metadata file versions in scan against versions on server.","displayable": true,"enabled": false}]')
-                      exit_code=$?
+                      response=$(curl -sS -k -L --fail \
+                          -H "Content-Type: application/json" \
+                          -H "Accept: application/json" \
+                          -H "Authorization: FortifyToken $fortify_unified_login_token" \
+                          -d '[{"identifier": "com.fortify.manager.BLL.processingrules.BuildProjectProcessingRule","displayName": "Require approval if the Build Project is different between scans","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.FileCountProcessingRule","displayName": "Require approval if file count differs by more than 10%","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.LOCCountProcessingRule","displayName": "Require approval if line count differs by more than 10%","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.NewerEngineVersionProcessingRule","displayName": "Require approval if the engine version of a scan is newer than the engine version of the previous scan","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.RulePackVersionProcessingRule","displayName": "Require approval if the rulepacks used in the scan do not match the rulepacks used in the previous scan","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.WarningProcessingRule","displayName": "Require approval if result has analysis warnings","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.ExternalListVersionProcessingRule","displayName": "Check external metadata file versions in scan against versions on server.","displayable": true,"enabled": false}]' \
+                          -X PUT \
+                          "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/resultProcessingRules") \
+                          || exit_code=$?
+                      
+                      # Valida se a resposta é JSON válido
+                      if ! echo "$response" | jq -e . >/dev/null 2>&1; then
+                          echo "❌ Resposta não é JSON válido ao configurar regras:"
+                          echo "$response" | head -20
+                          exit 1
+                      fi
+                      
                       fortify_verificar_resposta_api
                       echo "✅ Regras de processamento do projeto $fortify_project_name configuradas com sucesso."
                   }
@@ -254,31 +315,48 @@ jobs:
                           return 1
                       fi
                       
-                      # Verifica se o scan está completo
+                      # Verifica se o scan está completo com retry progressivo
                       echo "🔍 Verificando status do scan..."
-                      scan_status_response=$(curl -sS -k -X GET --header 'Content-Type: application/json' \
-                          --header 'Accept: application/json' \
-                          --header "Authorization: FortifyToken $fortify_unified_login_token" \
-                          "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id")
-                      exit_code=$?
-                      
-                      if [ "$exit_code" == "0" ]; then
-                          scan_status=$(echo "$scan_status_response" | jq -r '.data.status // "UNKNOWN"')
-                          echo "📊 Status do scan: $scan_status"
+                      for i in {1..5}; do
+                          scan_status_response=$(curl -sS -k -L --fail \
+                              -H "Content-Type: application/json" \
+                              -H "Accept: application/json" \
+                              -H "Authorization: FortifyToken $fortify_unified_login_token" \
+                              "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id") \
+                              || exit_code=$?
                           
-                          if [ "$scan_status" == "REQUIRES_AUTH" ] || [ "$scan_status" == "PROCESSING" ]; then
-                              echo "⏳ Scan ainda em processamento..."
+                          # Valida se a resposta é JSON válido
+                          if echo "$scan_status_response" | jq -e . >/dev/null 2>&1; then
+                              scan_status=$(echo "$scan_status_response" | jq -r '.data.status // "UNKNOWN"')
+                              echo "📊 Status do scan: $scan_status"
+                              
+                              if [ "$scan_status" == "REQUIRES_AUTH" ] || [ "$scan_status" == "PROCESSING" ]; then
+                                  if [ $i -lt 5 ]; then
+                                      echo "⏳ Scan ainda em processamento... Tentativa $i/5"
+                                      sleep $((i*15))  # Timeout progressivo: 15s, 30s, 45s, 60s
+                                      continue
+                                  else
+                                      echo "⚠️ Timeout: Scan ainda processando após 5 tentativas"
+                                      return 1
+                                  fi
+                              else
+                                  break  # Scan completo, sai do loop
+                              fi
+                          else
+                              echo "❌ Resposta inválida ao verificar status:"
+                              echo "$scan_status_response" | head -10
                               return 1
                           fi
-                      fi
+                      done
                       
                       # Busca TODAS as vulnerabilidades (sem filtro de severidade)
                       echo "🔍 Buscando vulnerabilidades..."
-                      all_issues_response=$(curl -sS -k -X GET --header 'Content-Type: application/json' \
-                          --header 'Accept: application/json' \
-                          --header "Authorization: FortifyToken $fortify_unified_login_token" \
-                          "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/issues?limit=1000")
-                      exit_code=$?
+                      all_issues_response=$(curl -sS -k -L --fail \
+                          -H "Content-Type: application/json" \
+                          -H "Accept: application/json" \
+                          -H "Authorization: FortifyToken $fortify_unified_login_token" \
+                          "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/issues?limit=1000") \
+                          || exit_code=$?
                       
                       # Verifica se a API retornou erro
                       if [ "$exit_code" != "0" ]; then
@@ -292,6 +370,13 @@ jobs:
                           return 1
                       fi
                       
+                      # Valida se a resposta é JSON válido
+                      if ! echo "$all_issues_response" | jq -e . >/dev/null 2>&1; then
+                          echo "❌ Resposta não é JSON válido ao buscar vulnerabilidades:"
+                          echo "$all_issues_response" | head -20
+                          return 1
+                      fi
+                      
                       # Verifica se há erro na resposta JSON
                       error_message=$(echo "$all_issues_response" | jq -r '.message // empty')
                       if [ -n "$error_message" ]; then
@@ -300,7 +385,7 @@ jobs:
                       fi
                       
                       # Verifica se há dados na resposta
-                      data_count=$(echo "$all_issues_response" | jq '.data | length' 2>/dev/null || echo "0")
+                      data_count=$(echo "$all_issues_response" | jq -r '.data | length' 2>/dev/null || echo "0")
                       if [ "$data_count" == "0" ]; then
                           echo "⚠️ Nenhuma vulnerabilidade encontrada no scan atual."
                           echo "0" > /tmp/fortify_total_count
@@ -318,11 +403,11 @@ jobs:
                       echo "$all_issues_response" > /tmp/fortify_all_issues.json
                       
                       # Contadores por severidade (tenta friority e priority como fallback)
-                      critical_count=$(echo "$all_issues_response" | jq '[.data[] | select((.friority // .priority) == "Critical")] | length')
-                      high_count=$(echo "$all_issues_response" | jq '[.data[] | select((.friority // .priority) == "High")] | length')
-                      medium_count=$(echo "$all_issues_response" | jq '[.data[] | select((.friority // .priority) == "Medium")] | length')
-                      low_count=$(echo "$all_issues_response" | jq '[.data[] | select((.friority // .priority) == "Low")] | length')
-                      total_count=$(echo "$all_issues_response" | jq '.data | length')
+                      critical_count=$(echo "$all_issues_response" | jq -r '[.data[] | select((.friority // .priority) == "Critical")] | length')
+                      high_count=$(echo "$all_issues_response" | jq -r '[.data[] | select((.friority // .priority) == "High")] | length')
+                      medium_count=$(echo "$all_issues_response" | jq -r '[.data[] | select((.friority // .priority) == "Medium")] | length')
+                      low_count=$(echo "$all_issues_response" | jq -r '[.data[] | select((.friority // .priority) == "Low")] | length')
+                      total_count=$(echo "$all_issues_response" | jq -r '.data | length')
                       
                       # Valida se os contadores são números válidos
                       critical_count=${critical_count:-0}
@@ -463,11 +548,24 @@ jobs:
                   
                   # Verificar se projeto e versão já existem
                   echo "🔍 Verificando se o projeto $fortify_project_name existe no SSC..."
-                  response=$(curl -sS -k -X GET --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/projectVersions?q=$fortify_project_name&fulltextsearch=true")
-                  exit_code=$?
+                  response=$(curl -sS -k -L --fail \
+                      -H "Accept: application/json" \
+                      -H "Authorization: FortifyToken $fortify_unified_login_token" \
+                      "$fortify_ssc_api_url/projectVersions?q=$fortify_project_name&fulltextsearch=true") \
+                      || exit_code=$?
+                  
+                  # Valida se a resposta é JSON válido
+                  if ! echo "$response" | jq -e . >/dev/null 2>&1; then
+                      echo "❌ Resposta não é JSON válido. Conteúdo recebido:"
+                      echo "$response" | head -20
+                      echo "❌ Exit code: $exit_code"
+                      echo "❌ Verifique: URL, token, conectividade e permissões"
+                      exit 1
+                  fi
+                  
                   fortify_verificar_resposta_api
-                  fortify_project_id=$(echo "$response" | jq '.data[] | select(.project.name=="'$fortify_project_name'") | .project.id' | head -1 | awk '{$1=$1};1')
-                  fortify_project_version_id=$(echo "$response" | jq '.data[] | select(.project.name=="'$fortify_project_name'") | select(.name=="'$fortify_version_name'") | .id' | awk '{$1=$1};1')
+                  fortify_project_id=$(echo "$response" | jq -r '.data[] | select(.project.name=="'"$fortify_project_name"'") | .project.id' | head -1 | awk '{$1=$1};1')
+                  fortify_project_version_id=$(echo "$response" | jq -r '.data[] | select(.project.name=="'"$fortify_project_name"'") | select(.name=="'"$fortify_version_name"'") | .id' | head -1 | awk '{$1=$1};1')
                   
                   if [ "$fortify_project_version_id" != "" ]; then
                       # Já existe projeto e versão no SSC
@@ -591,15 +689,23 @@ jobs:
                       filtro_url_encoded=$(echo "$filtro_aplicado" | jq -sRr '@uri')
                       echo "📡 Consultando vulnerabilidades no Fortify SSC..."
                     
-                      response=$(curl -sS -k -X GET --header 'Content-Type: application/json' \
-                          --header 'Accept: application/json' \
-                          --header "Authorization: FortifyToken $fortify_unified_login_token" \
-                          "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/issues?qm=issues&q=$filtro_url_encoded")
-                      exit_code=$?
+                      response=$(curl -sS -k -L --fail \
+                          -H "Content-Type: application/json" \
+                          -H "Accept: application/json" \
+                          -H "Authorization: FortifyToken $fortify_unified_login_token" \
+                          "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/issues?qm=issues&q=$filtro_url_encoded") \
+                          || exit_code=$?
+                      
+                      # Valida se a resposta é JSON válido
+                      if ! echo "$response" | jq -e . >/dev/null 2>&1; then
+                          echo "❌ Resposta não é JSON válido ao consultar gate:"
+                          echo "$response" | head -20
+                          exit 1
+                      fi
                     
                       fortify_verificar_resposta_api
                     
-                      num_issues=$(echo "$response" | jq '.count')
+                      num_issues=$(echo "$response" | jq -r '.count')
                     
                       if [ "$num_issues" -gt 0 ]; then
                           echo "❌ Gate falhou: **$num_issues** vulnerabilidades encontradas com base no filtro aplicado."

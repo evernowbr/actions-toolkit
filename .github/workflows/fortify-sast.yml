@@ -180,17 +180,6 @@ jobs:
                       echo "✅ Regras de processamento do projeto $fortify_project_name configuradas com sucesso."
                   }
 
-                  # ========== FUNÇÕES PARA RELATÓRIO AVANÇADO ==========
-                  # Implementação de relatório visual estilo Trivy Scanner
-                  # - Extrai dados detalhados via API do Fortify SSC
-                  # - Gera tabelas formatadas com vulnerabilidades
-                  # - Breakdown por categoria e severidade  
-                  # - Resumo executivo com recomendações
-                  # - Compatível com diferentes versões da API (friority/priority)
-                  # - Tratamento robusto de erros e valores ausentes
-                  # - Geração de relatório SARIF para integração com IDEs
-                  # - CORREÇÃO: Campo fortify_tagged simplificado para evitar erro de arrays nulos
-
                   fortify_gerar_sarif() {
                       echo "📋 Gerando relatório SARIF para integração com IDEs..."
                       

@@ -122,14 +122,15 @@ jobs:
                   }
 
                   # ========== FUNÇÕES PARA RELATÓRIO AVANÇADO ==========
-                  # Implementação de relatório visual estilo Trivy Scanner
-                  # - Extrai dados detalhados via API do Fortify SSC
-                  # - Gera tabelas formatadas com vulnerabilidades
-                  # - Breakdown por categoria e severidade  
-                  # - Resumo executivo com recomendações
-                  # - Compatível com diferentes versões da API (friority/priority)
-                  # - Tratamento robusto de erros e valores ausentes
-                  # - Geração de relatório SARIF para integração com IDEs
+# Implementação de relatório visual estilo Trivy Scanner
+# - Extrai dados detalhados via API do Fortify SSC
+# - Gera tabelas formatadas com vulnerabilidades
+# - Breakdown por categoria e severidade  
+# - Resumo executivo com recomendações
+# - Compatível com diferentes versões da API (friority/priority)
+# - Tratamento robusto de erros e valores ausentes
+# - Geração de relatório SARIF para integração com IDEs
+# - CORREÇÃO: Campo fortify_tagged simplificado para evitar erro de arrays nulos
 
                   fortify_gerar_sarif() {
                       echo "📋 Gerando relatório SARIF para integração com IDEs..."
@@ -143,8 +144,8 @@ jobs:
                       # Cria diretório para artefatos
                       mkdir -p fortify-artifacts
                       
-                      # Gera SARIF a partir dos dados do Fortify
-                      cat /tmp/fortify_all_issues.json | jq -r '
+                      # Gera SARIF a partir dos dados do Fortify (COMANDO CORRIGIDO)
+                      cat /tmp/fortify_all_issues.json | jq '
                       {
                           "$schema": "https://schemastore.azurewebsites.net/schemas/json/sarif-2.1.0-rtm.5.json",
                           "version": "2.1.0",
@@ -200,7 +201,7 @@ jobs:
                                               "fortify_category": (.subCategoryName // .categoryName // .issueName // .subCategory // .category // .kingdom // "Unknown"),
                                               "fortify_issue_id": (.issueInstanceId // (.id | tostring)),
                                               "fortify_analysis_type": (.analysisType // .analysis.analysisType // .analysisName // .analysis // "N/A"),
-                                              "fortify_tagged": (.customAttributes[]? | select(.name=="Tagged") | .value // .attributes[]? | select(.name=="Tagged") | .value // "N/A"),
+                                              "fortify_tagged": "N/A",
                                               "fortify_project": "'$fortify_project_name'",
                                               "fortify_version": "'$fortify_version_name'",
                                               "fortify_project_id": "'$fortify_project_id'",
@@ -214,6 +215,12 @@ jobs:
                       
                       # Verifica se o SARIF foi gerado com sucesso
                       if [ -f fortify-artifacts/fortify-sast-results.sarif ]; then
+                          # Valida o JSON do SARIF
+                          if ! cat fortify-artifacts/fortify-sast-results.sarif | jq empty 2>/dev/null; then
+                              echo "❌ SARIF gerado com JSON inválido"
+                              return 1
+                          fi
+                          
                           sarif_count=$(cat fortify-artifacts/fortify-sast-results.sarif | jq '.runs[0].results | length')
                           echo "✅ SARIF gerado com sucesso: $sarif_count vulnerabilidades convertidas"
                           echo "📁 Arquivo: fortify-artifacts/fortify-sast-results.sarif"
@@ -225,6 +232,13 @@ jobs:
                           echo "   - Projeto: $fortify_project_name"
                           echo "   - Versão: $fortify_version_name"
                           echo "   - Total de findings: $sarif_count"
+                          
+                          # Verifica se há vulnerabilidades
+                          if [ "$sarif_count" -gt 0 ]; then
+                              echo "🎯 SARIF válido com $sarif_count vulnerabilidades para análise"
+                          else
+                              echo "⚠️ SARIF gerado mas sem vulnerabilidades - verifique se o scan encontrou issues"
+                          fi
                           
                           return 0
                       else

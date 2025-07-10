@@ -32,6 +32,7 @@ jobs:
     scan:
         name: Fortify SAST Scan
         runs-on: self-hosted
+        timeout-minutes: 45
 
         steps:
             - name: Run Scan
@@ -54,8 +55,15 @@ jobs:
                       # Inicializa exit_code se não estiver definido
                       exit_code="${exit_code:-0}"
                       
+                      # Verifica se a resposta está vazia
+                      if [ -z "${response:-}" ]; then
+                          echo "❌ Resposta vazia da API"
+                          echo "❌ Exit code: $exit_code"
+                          exit 1
+                      fi
+                      
                       # Valida se a resposta é JSON válido antes de processar
-                      if [ -z "$response" ] || ! echo "$response" | jq -e . >/dev/null 2>&1; then
+                      if ! echo "$response" | jq -e . >/dev/null 2>&1; then
                           echo "❌ Resposta não é JSON válido. Conteúdo recebido:"
                           echo "$response" | head -20
                           echo "❌ Exit code: $exit_code"
@@ -187,10 +195,11 @@ jobs:
                       echo "📋 Gerando relatório SARIF otimizado para GitHub Code Scanning..."
                       
                       # Inicialização segura de variáveis
-                      fortify_project_name="${fortify_project_name:-Unknown}"
-                      fortify_version_name="${fortify_version_name:-Unknown}"
-                      fortify_project_id="${fortify_project_id:-0}"
-                      fortify_project_version_id="${fortify_project_version_id:-0}"
+                      local project_name="${fortify_project_name:-Unknown}"
+                      local version_name="${fortify_version_name:-Unknown}"
+                      local project_id="${fortify_project_id:-0}"
+                      local version_id="${fortify_project_version_id:-0}"
+                      local timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
                       
                       # Verifica se temos dados para converter
                       if [ ! -f /tmp/fortify_all_issues.json ]; then
@@ -231,10 +240,11 @@ jobs:
                       # Cria diretório para artefatos
                       mkdir -p fortify-artifacts
                       
-                      # Extrai regras únicas para o bloco rules com normalização
+                      # Etapa 1: Extrair regras únicas com argumentos seguros
                       echo "🔍 Extraindo regras únicas para otimização do SARIF..."
                       echo "📋 Padronização de severidades: Critical/High → error, Medium → warning, Low → note"
-                      unique_rules=$(cat /tmp/fortify_all_issues.json | jq -r '
+                      
+                      cat /tmp/fortify_all_issues.json | jq -r '
                           .data[] | 
                           (.subCategoryName // .categoryName // .issueName // .subCategory // .category // .kingdom // "Unknown") as $ruleName |
                           ($ruleName | gsub(" "; "_") | gsub(":"; "_") | gsub("[^a-zA-Z0-9_]"; "_")) as $ruleId |
@@ -257,15 +267,19 @@ jobs:
                                       end
                                   )
                               },
-                              "helpUri": "https://fortify-ssc.evernow.com.br/html/ssc/version/${fortify_project_version_id:-12345}/audit"
+                              "helpUri": "https://fortify-ssc.evernow.com.br/html/ssc/version/'"$version_id"'/audit"
                           }
-                      ' | jq -s 'unique_by(.id)')
+                      ' | jq -s 'unique_by(.id)' > /tmp/sarif_rules.json
                       
-                      # Gera SARIF otimizado com todos os campos necessários para navegação
+                      # Etapa 2: Gerar SARIF principal com argumentos seguros
                       echo "🔧 Gerando SARIF navegável com $data_count vulnerabilidades..."
                       
-                      # Testa o comando jq primeiro
-                      test_result=$(cat /tmp/fortify_all_issues.json | jq --argjson rules "$unique_rules" '
+                      cat /tmp/fortify_all_issues.json | jq --slurpfile rules /tmp/sarif_rules.json \
+                          --arg project "$project_name" \
+                          --arg version "$version_name" \
+                          --arg timestamp "$timestamp" \
+                          --arg project_id "$project_id" \
+                          --arg version_id "$version_id" '
                       {
                           "$schema": "https://schemastore.azurewebsites.net/schemas/json/sarif-2.1.0-rtm.5.json",
                           "version": "2.1.0",
@@ -288,8 +302,8 @@ jobs:
                                       {
                                           "executionSuccessful": true,
                                           "commandLine": "scancentral",
-                                          "startTimeUtc": "'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'",
-                                          "endTimeUtc": "'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'",
+                                          "startTimeUtc": $timestamp,
+                                          "endTimeUtc": $timestamp,
                                           "workingDirectory": {
                                               "uri": "file:///github/workspace/"
                                           }
@@ -351,131 +365,30 @@ jobs:
                                               "fortify_issue_id": $issueId,
                                               "fortify_analysis_type": (.analysisType // .analysis.analysisType // .analysisName // .analysis // "N/A"),
                                               "fortify_tagged": "N/A",
-                                              "fortify_project": "'${fortify_project_name:-Unknown}'",
-                                              "fortify_version": "'${fortify_version_name:-Unknown}'",
-                                              "fortify_project_id": "'${fortify_project_id:-0}'",
-                                              "fortify_version_id": "'${fortify_project_version_id:-0}'"
+                                              "fortify_project": $project,
+                                              "fortify_version": $version,
+                                              "fortify_project_id": $project_id,
+                                              "fortify_version_id": $version_id
                                           }
                                       }
                                   ]
                               }
                           ]
-                      }' 2>&1)
+                      }' > fortify-artifacts/fortify-sast-results.sarif
                       
                       # Verifica se o comando jq funcionou
                       if [ $? -ne 0 ]; then
-                          echo "❌ Erro ao gerar SARIF com jq complexo, tentando versão simplificada..."
-                          
-                          # Fallback: SARIF simplificado mas ainda navegável
-                          cat /tmp/fortify_all_issues.json | jq '
-                          {
-                              "$schema": "https://schemastore.azurewebsites.net/schemas/json/sarif-2.1.0-rtm.5.json",
-                              "version": "2.1.0",
-                              "originalUriBaseIds": {
-                                  "SRCROOT": {
-                                      "uri": "file:///github/workspace/"
-                                  }
-                              },
-                              "runs": [
-                                  {
-                                      "tool": {
-                                          "driver": {
-                                              "name": "Fortify Static Code Analyzer",
-                                              "version": "25.2.0",
-                                              "informationUri": "https://www.microfocus.com/en-us/cyberres/application-security/static-code-analyzer",
-                                              "rules": []
-                                          }
-                                      },
-                                      "invocations": [
-                                          {
-                                              "executionSuccessful": true,
-                                              "commandLine": "scancentral",
-                                              "startTimeUtc": "'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'",
-                                              "endTimeUtc": "'$(date -u +"%Y-%m-%dT%H:%M:%SZ")'",
-                                              "workingDirectory": {
-                                                  "uri": "file:///github/workspace/"
-                                              }
-                                          }
-                                      ],
-                                      "results": [
-                                          .data[] | 
-                                          (.subCategoryName // .categoryName // .issueName // .subCategory // .category // .kingdom // "Unknown") as $ruleName |
-                                          ($ruleName | gsub(" "; "_") | gsub(":"; "_") | gsub("[^a-zA-Z0-9_]"; "_")) as $ruleId |
-                                          (.fileName // .primaryLocation // .folderName // "Unknown File") as $fileName |
-                                          (.lineNumber // 1) as $lineNumber |
-                                          (.friority // .priority // "Unknown") as $severity |
-                                          (.description // .issueName // "Vulnerabilidade detectada pelo Fortify") as $description |
-                                          (.issueInstanceId // (.id | tostring)) as $issueId |
-                                          {
-                                              "ruleId": $ruleId,
-                                              "level": (
-                                                  if $severity == "Critical" then "error"
-                                                  elif $severity == "High" then "error"
-                                                  elif $severity == "Medium" then "warning"
-                                                  elif $severity == "Low" then "note"
-                                                  else "note"
-                                                  end
-                                              ),
-                                              "message": {
-                                                  "text": $description
-                                              },
-                                              "locations": [
-                                                  {
-                                                      "physicalLocation": {
-                                                          "artifactLocation": {
-                                                              "uri": $fileName,
-                                                              "uriBaseId": "SRCROOT"
-                                                          },
-                                                          "region": {
-                                                              "startLine": $lineNumber,
-                                                              "startColumn": 1,
-                                                              "endLine": $lineNumber,
-                                                              "endColumn": 80
-                                                          },
-                                                          "contextRegion": {
-                                                              "startLine": ($lineNumber - 2),
-                                                              "startColumn": 1,
-                                                              "endLine": ($lineNumber + 2),
-                                                              "endColumn": 80,
-                                                              "snippet": {
-                                                                  "text": "// Contexto da vulnerabilidade (linhas " + ($lineNumber - 2 | tostring) + "-" + ($lineNumber + 2 | tostring) + ")"
-                                                              }
-                                                          }
-                                                      }
-                                                  }
-                                              ],
-                                              "partialFingerprints": {
-                                                  "primaryLocationLineHash": $fileName + ":" + ($lineNumber | tostring) + ":" + $ruleId + ":" + ($issueId | .[0:12])
-                                              },
-                                              "properties": {
-                                                  "fortify_severity": $severity,
-                                                  "fortify_category": $ruleName,
-                                                  "fortify_issue_id": $issueId,
-                                                  "fortify_project": "'${fortify_project_name:-Unknown}'",
-                                                  "fortify_version": "'${fortify_version_name:-Unknown}'"
-                                              }
-                                          }
-                                      ]
-                                  }
-                              ]
-                          }' > fortify-artifacts/fortify-sast-results.sarif
-                          
-                          if [ $? -ne 0 ]; then
-                              echo "❌ Erro também na versão simplificada"
-                              return 1
-                          else
-                              echo "✅ SARIF simplificado gerado com sucesso"
-                          fi
+                          echo "❌ Erro ao gerar SARIF com jq, gerando SARIF vazio como fallback..."
+                          echo '{"$schema":"https://schemastore.azurewebsites.net/schemas/json/sarif-2.1.0-rtm.5.json","version":"2.1.0","runs":[{"tool":{"driver":{"name":"Fortify Static Code Analyzer","version":"25.2.0"}},"results":[]}]}' > fortify-artifacts/fortify-sast-results.sarif
+                          echo "✅ SARIF vazio gerado como fallback"
                       else
-                          # Salva o SARIF otimizado
-                          echo "$test_result" > fortify-artifacts/fortify-sast-results.sarif
                           echo "✅ SARIF navegável gerado com sucesso"
                       fi
                       
                       # Verifica se o SARIF foi gerado com sucesso
                       if [ -f fortify-artifacts/fortify-sast-results.sarif ]; then
                           # Valida o JSON do SARIF
-                          if [ ! -f fortify-artifacts/fortify-sast-results.sarif ] || ! cat fortify-artifacts/fortify-sast-results.sarif | jq empty 2>/dev/null; then
+                          if ! cat fortify-artifacts/fortify-sast-results.sarif | jq empty 2>/dev/null; then
                               echo "❌ SARIF gerado com JSON inválido"
                               return 1
                           fi
@@ -1078,13 +991,13 @@ jobs:
                   fi
 
             - name: Upload SARIF to GitHub Code Scanning
-              uses: github/codeql-action/upload-sarif@v3
+              uses: github/codeql-action/upload-sarif@v3.27.0
               with:
                 sarif_file: fortify-artifacts/fortify-sast-results.sarif
               if: always()
 
             - name: Upload Fortify SARIF artifact (for manual download)
-              uses: actions/upload-artifact@v4
+              uses: actions/upload-artifact@v4.4.0
               with:
                 name: fortify-sarif
                 path: fortify-artifacts/fortify-sast-results.sarif

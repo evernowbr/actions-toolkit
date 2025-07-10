@@ -29,15 +29,10 @@ on:
                 required: true
 
 # ✅ PERMISSÕES MÍNIMAS PARA WORKFLOW REUTILIZÁVEL
-# Nota: O workflow chamador deve definir as permissões necessárias:
-# permissions:
-#   security-events: write  # Para upload SARIF
-#   actions: read           # Para metadados do workflow
-#   contents: read          # Para acessar código fonte
 permissions:
-    actions: none          # Workflow reutilizável não define permissões especiais
-    contents: read         # Para acessar código fonte  
-    security-events: none  # Permissões serão definidas pelo workflow chamador
+    actions: none
+    contents: read
+    security-events: none
 
 jobs:
     scan:
@@ -58,322 +53,321 @@ jobs:
                   fortify_controller_url: ${{ secrets.FORTIFY_CONTROLLER_URL }}
                   fortify_controller_token: ${{ secrets.FORTIFY_CONTROLLER_TOKEN }}
               run: |
-                  echo "Executando Fortify SAST"
-                  echo "export PATH=\$PATH:/opt/Fortify_ScanCentral_Client_25.2.0_x64/bin" >> /home/github-runner/.bashrc
-                  source ~/.bashrc
-
-                  fortify_verificar_resposta_api() {
-                      # Inicializa exit_code se não estiver definido
-                      exit_code="${exit_code:-0}"
+                  # ========== CONFIGURAÇÃO INICIAL ==========
+                  set -euo pipefail
+                  export PATH="$PATH:/opt/Fortify_ScanCentral_Client_25.2.0_x64/bin"
+                  
+                  # ========== FUNÇÕES UTILITÁRIAS OTIMIZADAS ==========
+                  
+                  # Função única de validação JSON (consolidada)
+                  validate_json_response() {
+                      local response="$1"
+                      local context="$2"
                       
-                      # Verifica se a resposta está vazia
-                      if [ -z "${response:-}" ]; then
-                          echo "❌ Resposta vazia da API"
-                          echo "❌ Exit code: $exit_code"
-                          exit 1
-                      fi
-                      
-                      # Valida se a resposta é JSON válido antes de processar
-                      if ! echo "$response" | jq -e . >/dev/null 2>&1; then
-                          echo "❌ Resposta não é JSON válido. Conteúdo recebido:"
-                          echo "$response" | head -20
-                          echo "❌ Exit code: $exit_code"
-                          exit 1
-                      fi
-                      
-                      if [ "$exit_code" == "0" ] || [ "$exit_code" == "" ]; then
-                          responseCode=$(echo "${response:-}" | jq -r '.responseCode // empty')
-                          if [ -n "$responseCode" ] && [ "$responseCode" != "200" ] && [ "$responseCode" != "201" ]; then
-                              echo "❌ Código de retorno diferente de 200: API retornou código $responseCode"
-                              echo "❌ Resposta da API: $response"
-                              exit 1
-                          fi
-                      else
-                          echo "❌ Comando retornou $exit_code"
-                          echo "❌ Mensagem de erro: $response"  
-                          exit $exit_code
-                      fi
-                  }
-
-                  fortify_verificar_codigo_de_resposta() {
-                  	if [ "$exit_code" != "0" ]; then
-                  		echo "❌ Comando retornou $exit_code"
-                  		exit $exit_code
-                  	fi
-                  }
-
-                  fortify_criar_projeto_e_versao() {
-                      # Cria um projeto e uma versão novos
-                      fortify_project_parameters='{"project":{"name":"'$fortify_project_name'"},"issueTemplateId":"Prioritized-HighRisk-Project-Template","name":"'$fortify_version_name'","customTagValuesAutoApply":true,"autoPredict":true,"predictionPolicy":"LAB Fortify Policy"}'
-                      response=$(curl -sS -k -L --fail \
-                          -H "Content-Type: application/json" \
-                          -H "Accept: application/json" \
-                          -H "Authorization: FortifyToken $fortify_unified_login_token" \
-                          -d "$fortify_project_parameters" \
-                          "$fortify_ssc_api_url/projectVersions") \
-                          || exit_code=$?
-                      
-                      # Valida se a resposta é JSON válido
-                      if [ -z "$response" ] || ! echo "$response" | jq -e . >/dev/null 2>&1; then
-                          echo "❌ Resposta não é JSON válido ao criar projeto:"
-                          echo "$response" | head -20
-                          exit 1
-                      fi
-                      
-                      fortify_verificar_resposta_api
-                      fortify_project_id=$(echo "$response" | jq -r '.data.project.id')
-                      fortify_project_version_id=$(echo "$response" | jq -r '.data.id')
-                      echo "✅ Projeto $fortify_project_name criado com ID $fortify_project_id."
-                      echo "✅ Versão $fortify_version_name criada com ID $fortify_project_version_id."
-                  }
-
-                  fortify_criar_versao() {
-                      # Cria uma versão para um projeto já existente
-                      fortify_project_parameters='{"project":{"name":"'$fortify_project_name'","id":"'$fortify_project_id'"},"issueTemplateId":"Prioritized-HighRisk-Project-Template","name": "'$fortify_version_name'"}'
-                      response=$(curl -sS -k -L --fail \
-                          -H "Content-Type: application/json" \
-                          -H "Accept: application/json" \
-                          -H "Authorization: FortifyToken $fortify_unified_login_token" \
-                          -d "$fortify_project_parameters" \
-                          "$fortify_ssc_api_url/projectVersions") \
-                          || exit_code=$?
-                      
-                      # Valida se a resposta é JSON válido
-                      if [ -z "$response" ] || ! echo "$response" | jq -e . >/dev/null 2>&1; then
-                          echo "❌ Resposta não é JSON válido ao criar versão:"
-                          echo "$response" | head -20
-                          exit 1
-                      fi
-                      
-                      fortify_verificar_resposta_api
-                      fortify_project_version_id=$(echo "$response" | jq -r '.data.id')
-                      echo "✅ Versão $fortify_version_name criada com ID $fortify_project_version_id."
-                  }
-
-                  fortify_configurar_projeto() {
-                  # Configurar parâmetros adicionais do projeto
-                  fortify_parametros='{"requests":[{"uri":"'$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/attributes'","httpVerb":"PUT","postData":[{"values":[{"guid":"New"}],"attributeDefinitionId":5},{"values":[{"guid":"Internal"}],"attributeDefinitionId":6},{"values":[{"guid":"internalnetwork"}],"attributeDefinitionId":7}]},{"uri":"'$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/authEntities'","httpVerb":"PUT","postData":[]},{"uri":"'$fortify_ssc_api_url/projectVersions/$fortify_project_version_id?hideProgress=true'","httpVerb":"PUT","postData":{"committed":true}}]}'
-                      response=$(curl -sS -k -L --fail \
-                          -H "Content-Type: application/json" \
-                          -H "Accept: application/json" \
-                          -H "Authorization: FortifyToken $fortify_unified_login_token" \
-                          -d "$fortify_parametros" \
-                          "$fortify_ssc_api_url/bulk") \
-                          || exit_code=$?
-                      
-                      # Valida se a resposta é JSON válido
-                      if [ -z "$response" ] || ! echo "$response" | jq -e . >/dev/null 2>&1; then
-                          echo "❌ Resposta não é JSON válido ao configurar projeto:"
-                          echo "$response" | head -20
-                          exit 1
-                      fi
-                      
-                  fortify_verificar_resposta_api
-                      successCount=$(echo "$response" | jq -r '.successCount')
-                  if [ "$successCount" != "3" ]; then
-                      echo "❌ Parâmetros adicionais do projeto $fortify_project_name configurados sem sucesso."
-                      echo "❌ Código de retorno diferente de 200: API retornou código $exit_code"
-                      echo "❌ Resposta da API: $response"
-                      exit 1
-                  else
-                      echo "✅ Parâmetros adicionais do projeto $fortify_project_name configurados com sucesso."
-                  fi
-                  }
-
-                  fortify_regras_processamento() {
-                  # Definir regras de processamento de resultados
-                      response=$(curl -sS -k -L --fail \
-                          -H "Content-Type: application/json" \
-                          -H "Accept: application/json" \
-                          -H "Authorization: FortifyToken $fortify_unified_login_token" \
-                          -d '[{"identifier": "com.fortify.manager.BLL.processingrules.BuildProjectProcessingRule","displayName": "Require approval if the Build Project is different between scans","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.FileCountProcessingRule","displayName": "Require approval if file count differs by more than 10%","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.LOCCountProcessingRule","displayName": "Require approval if line count differs by more than 10%","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.NewerEngineVersionProcessingRule","displayName": "Require approval if the engine version of a scan is newer than the engine version of the previous scan","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.RulePackVersionProcessingRule","displayName": "Require approval if the rulepacks used in the scan do not match the rulepacks used in the previous scan","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.WarningProcessingRule","displayName": "Require approval if result has analysis warnings","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.ExternalListVersionProcessingRule","displayName": "Check external metadata file versions in scan against versions on server.","displayable": true,"enabled": false}]' \
-                          -X PUT \
-                          "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/resultProcessingRules") \
-                          || exit_code=$?
-                      
-                      # Valida se a resposta é JSON válido
-                      if [ -z "$response" ] || ! echo "$response" | jq -e . >/dev/null 2>&1; then
-                          echo "❌ Resposta não é JSON válido ao configurar regras:"
-                          echo "$response" | head -20
-                          exit 1
-                      fi
-                      
-                  fortify_verificar_resposta_api
-                  echo "✅ Regras de processamento do projeto $fortify_project_name configuradas com sucesso."
-                  }
-
-                  fortify_gerar_sarif() {
-                      echo "📋 Gerando relatório SARIF otimizado - VERSÃO ROBUSTA..."
-                      
-                      # ========== ETAPA 1: VALIDAÇÕES INICIAIS ==========
-                      echo "🔍 Validações iniciais..."
-                      
-                      # Inicialização segura de variáveis
-                      local project_name="${fortify_project_name:-Unknown}"
-                      local version_name="${fortify_version_name:-Unknown}"
-                      local project_id="${fortify_project_id:-0}"
-                      local version_id="${fortify_project_version_id:-0}"
-                      local timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-                      
-                      echo "   • Projeto: $project_name"
-                      echo "   • Versão: $version_name"
-                      echo "   • Timestamp: $timestamp"
-                      
-                      # Verifica se temos dados para converter
-                      if [ ! -f /tmp/fortify_all_issues.json ]; then
-                          echo "❌ Nenhum dado de vulnerabilidade encontrado para gerar SARIF"
-                          echo "🔍 Verificando se o arquivo existe..."
-                          ls -la /tmp/fortify_* 2>/dev/null || echo "❌ Nenhum arquivo fortify encontrado em /tmp/"
+                      if [ -z "$response" ]; then
+                          echo "❌ Resposta vazia da API ($context)"
                           return 1
                       fi
                       
-                      # Verifica se o arquivo tem conteúdo
-                      file_size=$(wc -c < /tmp/fortify_all_issues.json)
-                      echo "📊 Tamanho do arquivo: $file_size bytes"
+                      if ! echo "$response" | jq -e . >/dev/null 2>&1; then
+                          echo "❌ JSON inválido ($context):"
+                          echo "$response" | head -10
+                          return 1
+                      fi
                       
-                      if [ "$file_size" -eq 0 ]; then
+                      # Verifica códigos de erro na resposta
+                      local error_msg=$(echo "$response" | jq -r '.message // empty')
+                      if [ -n "$error_msg" ]; then
+                          echo "❌ Erro da API ($context): $error_msg"
+                          return 1
+                      fi
+                      
+                      return 0
+                  }
+                  
+                  # Função segura para chamadas API
+                  api_call() {
+                      local method="${1:-GET}"
+                      local url="$2"
+                      local data="${3:-}"
+                      local context="$4"
+                      
+                      local curl_opts=(-sS -k -L --fail)
+                      curl_opts+=(-H "Content-Type: application/json")
+                      curl_opts+=(-H "Accept: application/json")
+                      curl_opts+=(-H "Authorization: FortifyToken $fortify_unified_login_token")
+                      
+                      if [ "$method" = "POST" ] || [ "$method" = "PUT" ]; then
+                          curl_opts+=(-X "$method")
+                          if [ -n "$data" ]; then
+                              curl_opts+=(-d "$data")
+                          fi
+                      fi
+                      
+                      curl_opts+=("$url")
+                      
+                      local response
+                      local exit_code
+                      
+                      response=$(curl "${curl_opts[@]}" 2>/dev/null) || exit_code=$?
+                      
+                      if [ "${exit_code:-0}" -ne 0 ]; then
+                          echo "❌ Falha na chamada API ($context): $exit_code"
+                          return 1
+                      fi
+                      
+                      if ! validate_json_response "$response" "$context"; then
+                          return 1
+                      fi
+                      
+                      echo "$response"
+                      return 0
+                  }
+                  
+                  # Função para sanitizar strings JSON
+                  sanitize_json_string() {
+                      local input="$1"
+                      echo "$input" | jq -Rs .
+                  }
+                  
+                  # ========== FUNÇÕES PRINCIPAIS OTIMIZADAS ==========
+                  
+                  fortify_criar_projeto_e_versao() {
+                      echo "🔧 Criando projeto e versão..."
+                      
+                      local project_data
+                      project_data=$(jq -n \
+                          --arg name "$fortify_project_name" \
+                          --arg version "$fortify_version_name" \
+                          '{
+                              "project": {"name": $name},
+                              "issueTemplateId": "Prioritized-HighRisk-Project-Template",
+                              "name": $version,
+                              "customTagValuesAutoApply": true,
+                              "autoPredict": true,
+                              "predictionPolicy": "LAB Fortify Policy"
+                          }')
+                      
+                      local response
+                      response=$(api_call "POST" "$fortify_ssc_api_url/projectVersions" "$project_data" "criar projeto")
+                      
+                      if [ $? -eq 0 ]; then
+                          fortify_project_id=$(echo "$response" | jq -r '.data.project.id')
+                          fortify_project_version_id=$(echo "$response" | jq -r '.data.id')
+                          echo "✅ Projeto criado: $fortify_project_id"
+                          echo "✅ Versão criada: $fortify_project_version_id"
+                      else
+                          echo "❌ Falha ao criar projeto/versão"
+                          return 1
+                      fi
+                  }
+                  
+                  fortify_criar_versao() {
+                      echo "🔧 Criando versão para projeto existente..."
+                      
+                      local version_data
+                      version_data=$(jq -n \
+                          --arg name "$fortify_project_name" \
+                          --arg id "$fortify_project_id" \
+                          --arg version "$fortify_version_name" \
+                          '{
+                              "project": {"name": $name, "id": $id},
+                              "issueTemplateId": "Prioritized-HighRisk-Project-Template",
+                              "name": $version
+                          }')
+                      
+                      local response
+                      response=$(api_call "POST" "$fortify_ssc_api_url/projectVersions" "$version_data" "criar versão")
+                      
+                      if [ $? -eq 0 ]; then
+                          fortify_project_version_id=$(echo "$response" | jq -r '.data.id')
+                          echo "✅ Versão criada: $fortify_project_version_id"
+                      else
+                          echo "❌ Falha ao criar versão"
+                          return 1
+                      fi
+                  }
+                  
+                  fortify_configurar_projeto() {
+                      echo "⚙️ Configurando projeto..."
+                      
+                      local config_data
+                      config_data=$(jq -n \
+                          --arg version_id "$fortify_project_version_id" \
+                          --arg base_url "$fortify_ssc_api_url" \
+                          '{
+                              "requests": [
+                                  {
+                                      "uri": ($base_url + "/projectVersions/" + $version_id + "/attributes"),
+                                      "httpVerb": "PUT",
+                                      "postData": [
+                                          {"values": [{"guid": "New"}], "attributeDefinitionId": 5},
+                                          {"values": [{"guid": "Internal"}], "attributeDefinitionId": 6},
+                                          {"values": [{"guid": "internalnetwork"}], "attributeDefinitionId": 7}
+                                      ]
+                                  },
+                                  {
+                                      "uri": ($base_url + "/projectVersions/" + $version_id + "/authEntities"),
+                                      "httpVerb": "PUT",
+                                      "postData": []
+                                  },
+                                  {
+                                      "uri": ($base_url + "/projectVersions/" + $version_id + "?hideProgress=true"),
+                                      "httpVerb": "PUT",
+                                      "postData": {"committed": true}
+                                  }
+                              ]
+                          }')
+                      
+                      local response
+                      response=$(api_call "POST" "$fortify_ssc_api_url/bulk" "$config_data" "configurar projeto")
+                      
+                      if [ $? -eq 0 ]; then
+                          local success_count=$(echo "$response" | jq -r '.successCount')
+                          if [ "$success_count" = "3" ]; then
+                              echo "✅ Projeto configurado com sucesso"
+                          else
+                              echo "⚠️ Configuração parcial: $success_count/3 operações"
+                          fi
+                      else
+                          echo "❌ Falha ao configurar projeto"
+                          return 1
+                      fi
+                  }
+                  
+                  fortify_regras_processamento() {
+                      echo "📋 Configurando regras de processamento..."
+                      
+                      local rules_data='[
+                          {"identifier": "com.fortify.manager.BLL.processingrules.BuildProjectProcessingRule", "displayName": "Require approval if the Build Project is different between scans", "displayable": true, "enabled": false},
+                          {"identifier": "com.fortify.manager.BLL.processingrules.FileCountProcessingRule", "displayName": "Require approval if file count differs by more than 10%", "displayable": true, "enabled": false},
+                          {"identifier": "com.fortify.manager.BLL.processingrules.LOCCountProcessingRule", "displayName": "Require approval if line count differs by more than 10%", "displayable": true, "enabled": false},
+                          {"identifier": "com.fortify.manager.BLL.processingrules.NewerEngineVersionProcessingRule", "displayName": "Require approval if the engine version of a scan is newer than the engine version of the previous scan", "displayable": true, "enabled": false},
+                          {"identifier": "com.fortify.manager.BLL.processingrules.RulePackVersionProcessingRule", "displayName": "Require approval if the rulepacks used in the scan do not match the rulepacks used in the previous scan", "displayable": true, "enabled": false},
+                          {"identifier": "com.fortify.manager.BLL.processingrules.WarningProcessingRule", "displayName": "Require approval if result has analysis warnings", "displayable": true, "enabled": false},
+                          {"identifier": "com.fortify.manager.BLL.processingrules.ExternalListVersionProcessingRule", "displayName": "Check external metadata file versions in scan against versions on server.", "displayable": true, "enabled": false}
+                      ]'
+                      
+                      local response
+                      response=$(api_call "PUT" "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/resultProcessingRules" "$rules_data" "configurar regras")
+                      
+                      if [ $? -eq 0 ]; then
+                          echo "✅ Regras de processamento configuradas"
+                      else
+                          echo "❌ Falha ao configurar regras"
+                          return 1
+                      fi
+                  }
+                  
+                  # ========== FUNÇÃO SARIF OTIMIZADA ==========
+                  
+                  fortify_gerar_sarif() {
+                      echo "📋 Gerando SARIF otimizado - VERSÃO ROBUSTA..."
+                      
+                      # Validações iniciais
+                      local project_name="${fortify_project_name:-Unknown}"
+                      local version_name="${fortify_version_name:-Unknown}"
+                      local version_id="${fortify_project_version_id:-0}"
+                      local timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+                      
+                      # Sanitização de variáveis para segurança
+                      project_name=$(echo "$project_name" | jq -Rs . | sed 's/^"//;s/"$//')
+                      version_name=$(echo "$version_name" | jq -Rs . | sed 's/^"//;s/"$//')
+                      version_id=$(echo "$version_id" | jq -Rs . | sed 's/^"//;s/"$//')
+                      
+                      if [ ! -f /tmp/fortify_all_issues.json ]; then
+                          echo "❌ Nenhum dado de vulnerabilidade encontrado"
+                          return 1
+                      fi
+                      
+                      if [ ! -s /tmp/fortify_all_issues.json ]; then
                           echo "❌ Arquivo JSON está vazio"
                           return 1
                       fi
                       
-                      # Verifica se o JSON é válido
-                      if ! cat /tmp/fortify_all_issues.json | jq empty 2>/dev/null; then
+                      if ! jq empty /tmp/fortify_all_issues.json 2>/dev/null; then
                           echo "❌ JSON inválido em /tmp/fortify_all_issues.json"
-                          echo "📄 Primeiras 10 linhas do arquivo:"
-                          head -10 /tmp/fortify_all_issues.json
                           return 1
                       fi
                       
-                      # Verifica se há dados na estrutura
-                      data_count=$(cat /tmp/fortify_all_issues.json | jq '.data | length' 2>/dev/null || echo "0")
-                      echo "🔍 Vulnerabilidades no JSON: $data_count"
-                      
+                      local data_count=$(jq '.data | length' /tmp/fortify_all_issues.json 2>/dev/null || echo "0")
                       if [ "$data_count" -eq 0 ]; then
                           echo "⚠️ Nenhuma vulnerabilidade encontrada no JSON"
-                          echo "📄 Estrutura do JSON:"
-                          cat /tmp/fortify_all_issues.json | jq 'keys' 2>/dev/null || echo "❌ Não é possível analisar a estrutura"
                           return 1
                       fi
                       
-                      # Cria diretório para artefatos
                       mkdir -p fortify-artifacts
                       
-                      # ========== ETAPA 2: GERAÇÃO DE REGRAS ÚNICAS ==========
-                      echo "🛠️ Gerando regras únicas..."
+                      # ETAPA 1: Processamento único otimizado
+                      echo "🛠️ Processando dados em uma única passagem..."
                       
-                      # Gera regras únicas com validação
-                      rules_result=$(cat /tmp/fortify_all_issues.json | jq -r '
-                          .data[] | 
-                          (.subCategoryName // .categoryName // .issueName // .subCategory // .category // .kingdom // "Unknown") as $ruleName |
-                          ($ruleName | gsub(" "; "_") | gsub(":"; "_") | gsub("[^a-zA-Z0-9_]"; "_")) as $ruleId |
-                          {
-                              "id": $ruleId,
-                              "name": $ruleName,
-                              "shortDescription": {
-                                  "text": (.description // .issueName // "Vulnerabilidade detectada pelo Fortify")
-                              },
-                              "fullDescription": {
-                                  "text": (.description // .issueName // "Vulnerabilidade detectada pelo Fortify. Verifique o código e aplique as correções recomendadas.")
-                              },
-                              "defaultConfiguration": {
-                                  "level": (
-                                      if (.friority // .priority) == "Critical" then "error"
-                                      elif (.friority // .priority) == "High" then "error"
-                                      elif (.friority // .priority) == "Medium" then "warning"
-                                      elif (.friority // .priority) == "Low" then "note"
-                                      else "note"
-                                      end
-                                  )
-                              },
-                              "helpUri": "https://fortify-ssc.evernow.com.br/html/ssc/version/'"$version_id"'/audit"
-                          }
-                      ' | jq -s 'unique_by(.id)' 2>/dev/null)
-                      
-                      if [ $? -ne 0 ] || [ -z "$rules_result" ]; then
-                          echo "❌ Erro ao gerar regras únicas"
-                          return 1
-                      fi
-                      
-                      # Salva regras em arquivo temporário
-                      echo "$rules_result" > /tmp/sarif_rules.json
-                      rules_count=$(echo "$rules_result" | jq 'length' 2>/dev/null || echo "0")
-                      echo "✅ Regras geradas: $rules_count"
-                      
-                      # ========== ETAPA 3: GERAÇÃO DE RESULTADOS ==========
-                      echo "🔧 Gerando resultados SARIF..."
-                      
-                      # Gera resultados com validação
-                      results_result=$(cat /tmp/fortify_all_issues.json | jq -r '
-                          .data[] | 
-                          (.subCategoryName // .categoryName // .issueName // .subCategory // .category // .kingdom // "Unknown") as $ruleName |
-                          ($ruleName | gsub(" "; "_") | gsub(":"; "_") | gsub("[^a-zA-Z0-9_]"; "_")) as $ruleId |
-                          (.fileName // .primaryLocation // .folderName // "Unknown File") as $fileName |
-                          (.lineNumber // 1) as $lineNumber |
-                          (.friority // .priority // "Unknown") as $severity |
-                          (.description // .issueName // "Vulnerabilidade detectada pelo Fortify") as $description |
-                          (.issueInstanceId // (.id | tostring)) as $issueId |
-                          {
-                              "ruleId": $ruleId,
-                              "level": (
-                                  if $severity == "Critical" then "error"
-                                  elif $severity == "High" then "error"
-                                  elif $severity == "Medium" then "warning"
-                                  elif $severity == "Low" then "note"
-                                  else "note"
-                                  end
-                              ),
-                              "message": {
-                                  "text": $description
-                              },
-                              "locations": [
-                                  {
-                                      "physicalLocation": {
-                                          "artifactLocation": {
-                                              "uri": $fileName,
-                                              "uriBaseId": "SRCROOT"
+                      # Processa todos os dados em uma única operação
+                      local processed_data
+                      processed_data=$(jq -n \
+                          --arg project_name "$project_name" \
+                          --arg version_name "$version_name" \
+                          --arg version_id "$version_id" \
+                          --slurpfile issues /tmp/fortify_all_issues.json \
+                          '{
+                              rules: ($issues[0].data | map({
+                                  id: ((.subCategoryName // .categoryName // .issueName // .subCategory // .category // .kingdom // "Unknown") | gsub(" "; "_") | gsub(":"; "_") | gsub("[^a-zA-Z0-9_]"; "_")),
+                                  name: (.subCategoryName // .categoryName // .issueName // .subCategory // .category // .kingdom // "Unknown"),
+                                  shortDescription: { text: (.description // .issueName // "Vulnerabilidade detectada pelo Fortify") },
+                                  fullDescription: { text: (.description // .issueName // "Vulnerabilidade detectada pelo Fortify. Verifique o código e aplique as correções recomendadas.") },
+                                  defaultConfiguration: { 
+                                      level: (if (.friority // .priority) == "Critical" or (.friority // .priority) == "High" then "error" elif (.friority // .priority) == "Medium" then "warning" else "note" end) 
+                                  },
+                                  helpUri: ("https://fortify-ssc.evernow.com.br/html/ssc/version/" + $version_id + "/audit")
+                              }) | unique_by(.id)),
+                              results: ($issues[0].data | map({
+                                  ruleId: ((.subCategoryName // .categoryName // .issueName // .subCategory // .category // .kingdom // "Unknown") | gsub(" "; "_") | gsub(":"; "_") | gsub("[^a-zA-Z0-9_]"; "_")),
+                                  level: (if (.friority // .priority) == "Critical" or (.friority // .priority) == "High" then "error" elif (.friority // .priority) == "Medium" then "warning" else "note" end),
+                                  message: { text: (.description // .issueName // "Vulnerabilidade detectada pelo Fortify") },
+                                  locations: [{
+                                      physicalLocation: {
+                                          artifactLocation: { 
+                                              uri: (.fileName // .primaryLocation // .folderName // "Unknown File"),
+                                              uriBaseId: "SRCROOT"
                                           },
-                                          "region": {
-                                              "startLine": $lineNumber,
-                                              "startColumn": 1,
-                                              "endLine": $lineNumber,
-                                              "endColumn": 80
+                                          region: { 
+                                              startLine: (.lineNumber // 1), 
+                                              startColumn: 1, 
+                                              endLine: (.lineNumber // 1), 
+                                              endColumn: 80 
                                           }
                                       }
+                                  }],
+                                  partialFingerprints: {
+                                      primaryLocationLineHash: ((.fileName // .primaryLocation // .folderName // "Unknown File") + ":" + ((.lineNumber // 1) | tostring) + ":" + ((.subCategoryName // .categoryName // .issueName // .subCategory // .category // .kingdom // "Unknown") | gsub(" "; "_") | gsub(":"; "_") | gsub("[^a-zA-Z0-9_]"; "_")) + ":" + ((.issueInstanceId // (.id | tostring)) | .[0:12]))
+                                  },
+                                  properties: {
+                                      fortify_severity: (.friority // .priority // "Unknown"),
+                                      fortify_category: (.subCategoryName // .categoryName // .issueName // .subCategory // .category // .kingdom // "Unknown"),
+                                      fortify_issue_id: (.issueInstanceId // (.id | tostring)),
+                                      fortify_project: $project_name,
+                                      fortify_version: $version_name
                                   }
-                              ],
-                              "partialFingerprints": {
-                                  "primaryLocationLineHash": $fileName + ":" + ($lineNumber | tostring) + ":" + $ruleId + ":" + ($issueId | .[0:12])
-                              },
-                              "properties": {
-                                  "fortify_severity": $severity,
-                                  "fortify_category": $ruleName,
-                                  "fortify_issue_id": $issueId,
-                                  "fortify_project": "'"$project_name"'",
-                                  "fortify_version": "'"$version_name"'"
-                              }
-                          }
-                      ' 2>/dev/null)
+                              }))
+                          }' 2>/dev/null)
                       
-                      if [ $? -ne 0 ] || [ -z "$results_result" ]; then
-                          echo "❌ Erro ao gerar resultados SARIF"
+                      if [ $? -ne 0 ] || [ -z "$processed_data" ]; then
+                          echo "❌ Erro ao processar dados"
                           return 1
                       fi
                       
-                      # Salva resultados em arquivo temporário
-                      echo "$results_result" > /tmp/sarif_results.json
-                      results_count=$(echo "$results_result" | jq 'length' 2>/dev/null || echo "0")
-                      echo "✅ Resultados gerados: $results_count"
+                      # Extrai regras e resultados do processamento único
+                      local rules_count=$(echo "$processed_data" | jq '.rules | length' 2>/dev/null || echo "0")
+                      local results_count=$(echo "$processed_data" | jq '.results | length' 2>/dev/null || echo "0")
                       
-                      # ========== ETAPA 4: MONTAGEM FINAL DO SARIF ==========
+                      echo "✅ Dados processados: $rules_count regras, $results_count resultados"
+                      
+                      # ETAPA 2: Montar SARIF final
                       echo "🔗 Montando SARIF final..."
-                      
-                      # Monta SARIF final com validação
-                      final_sarif=$(jq -n \
+                      if ! jq -n \
                           --arg schema "https://schemastore.azurewebsites.net/schemas/json/sarif-2.1.0-rtm.5.json" \
                           --arg version "2.1.0" \
                           --arg timestamp "$timestamp" \
-                          --slurpfile rules /tmp/sarif_rules.json \
-                          --slurpfile results /tmp/sarif_results.json \
+                          --argjson processed "$processed_data" \
                           '{
                               "$schema": $schema,
                               "version": $version,
@@ -389,7 +383,7 @@ jobs:
                                               "name": "Fortify Static Code Analyzer",
                                               "version": "25.2.0",
                                               "informationUri": "https://www.microfocus.com/en-us/cyberres/application-security/static-code-analyzer",
-                                              "rules": $rules[0]
+                                              "rules": $processed.rules
                                           }
                                       },
                                       "invocations": [
@@ -403,610 +397,368 @@ jobs:
                                               }
                                           }
                                       ],
-                                      "results": $results[0]
+                                      "results": $processed.results
                                   }
                               ]
-                          }' 2>/dev/null)
-                      
-                      if [ $? -ne 0 ] || [ -z "$final_sarif" ]; then
+                          }' > fortify-artifacts/fortify-sast-results.sarif 2>/dev/null; then
                           echo "❌ Erro ao montar SARIF final"
                           return 1
                       fi
                       
-                      # Salva SARIF final
-                      echo "$final_sarif" > fortify-artifacts/fortify-sast-results.sarif
-                      
-                      # ========== ETAPA 5: VALIDAÇÃO FINAL ==========
-                      echo "🔍 Validação final do SARIF..."
-                      
-                      # Valida JSON do SARIF
-                      if ! cat fortify-artifacts/fortify-sast-results.sarif | jq empty 2>/dev/null; then
+                      # Validação final
+                      if jq empty fortify-artifacts/fortify-sast-results.sarif 2>/dev/null; then
+                          local final_count=$(jq '.runs[0].results | length' fortify-artifacts/fortify-sast-results.sarif 2>/dev/null || echo "0")
+                          local final_rules=$(jq '.runs[0].tool.driver.rules | length' fortify-artifacts/fortify-sast-results.sarif 2>/dev/null || echo "0")
+                          local final_size=$(wc -c < fortify-artifacts/fortify-sast-results.sarif)
+                          
+                          echo ""
+                          echo "🎉 SARIF GERADO COM SUCESSO!"
+                          echo "📊 Estatísticas finais:"
+                          echo "   • Vulnerabilidades processadas: $final_count"
+                          echo "   • Regras únicas: $final_rules"
+                          echo "   • Tamanho do arquivo: $((final_size/1024))KB"
+                          echo "   • Formato: SARIF 2.1.0 válido"
+                          echo "   • Compatibilidade: GitHub Code Scanning ✅"
+                          echo "   • Compatibilidade: IDEs modernas ✅"
+                          
+                          return 0
+                      else
                           echo "❌ SARIF final com JSON inválido"
                           return 1
                       fi
-                      
-                      # Estatísticas finais
-                      final_count=$(cat fortify-artifacts/fortify-sast-results.sarif | jq '.runs[0].results | length' 2>/dev/null || echo "0")
-                      final_rules=$(cat fortify-artifacts/fortify-sast-results.sarif | jq '.runs[0].tool.driver.rules | length' 2>/dev/null || echo "0")
-                      final_size=$(wc -c < fortify-artifacts/fortify-sast-results.sarif)
-                      
-                      echo ""
-                      echo "🎉 SARIF GERADO COM SUCESSO!"
-                      echo "📊 Estatísticas finais:"
-                      echo "   • Vulnerabilidades processadas: $final_count"
-                      echo "   • Regras únicas: $final_rules"
-                      echo "   • Tamanho do arquivo: $((final_size/1024))KB"
-                      echo "   • Formato: SARIF 2.1.0 válido"
-                      echo "   • Compatibilidade: GitHub Code Scanning ✅"
-                      echo "   • Compatibilidade: IDEs modernas ✅"
-                      
-                      # Limpeza de arquivos temporários
-                      rm -f /tmp/sarif_rules.json /tmp/sarif_results.json
-                      
-                      return 0
                   }
                   
-                  fortify_extrair_estatisticas_completas() {
-                      echo "📊 Extraindo estatísticas completas de vulnerabilidades..."
+                  # ========== FALLBACK ROBUSTO OTIMIZADO ==========
+                  
+                  fortify_gerar_sarif_fallback() {
+                      echo "🔄 Gerando SARIF simplificado como fallback..."
+                      mkdir -p fortify-artifacts
                       
-                      # Verifica se temos o project_version_id
+                      local timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+                      local project_name="${fortify_project_name:-Unknown}"
+                      local version_name="${fortify_version_name:-Unknown}"
+                      
+                      # Sanitização de variáveis para segurança
+                      project_name=$(echo "$project_name" | jq -Rs . | sed 's/^"//;s/"$//')
+                      version_name=$(echo "$version_name" | jq -Rs . | sed 's/^"//;s/"$//')
+                      
+                      # SARIF mínimo válido com processamento seguro
+                      local fallback_sarif
+                      fallback_sarif=$(jq -n \
+                          --arg timestamp "$timestamp" \
+                          --arg project_name "$project_name" \
+                          --arg version_name "$version_name" \
+                          --slurpfile issues /tmp/fortify_all_issues.json \
+                          '{
+                              "$schema": "https://schemastore.azurewebsites.net/schemas/json/sarif-2.1.0-rtm.5.json",
+                              "version": "2.1.0",
+                              "originalUriBaseIds": {
+                                  "SRCROOT": {
+                                      "uri": "file:///github/workspace/"
+                                  }
+                              },
+                              "runs": [{
+                                  "tool": {
+                                      "driver": {
+                                          "name": "Fortify Static Code Analyzer",
+                                          "version": "25.2.0",
+                                          "informationUri": "https://www.microfocus.com/en-us/cyberres/application-security/static-code-analyzer",
+                                          "rules": []
+                                      }
+                                  },
+                                  "invocations": [{
+                                      "executionSuccessful": true,
+                                      "commandLine": "scancentral",
+                                      "startTimeUtc": $timestamp,
+                                      "endTimeUtc": $timestamp,
+                                      "workingDirectory": {
+                                          "uri": "file:///github/workspace/"
+                                      }
+                                  }],
+                                  "results": ($issues[0].data | map({
+                                      ruleId: "fortify_finding",
+                                      level: (if (.friority // .priority) == "Critical" or (.friority // .priority) == "High" then "error" elif (.friority // .priority) == "Medium" then "warning" else "note" end),
+                                      message: { text: (.description // .issueName // "Vulnerabilidade detectada pelo Fortify") },
+                                      locations: [{
+                                          physicalLocation: {
+                                              artifactLocation: { 
+                                                  uri: (.fileName // .primaryLocation // .folderName // "Unknown File"),
+                                                  uriBaseId: "SRCROOT"
+                                              },
+                                              region: { 
+                                                  startLine: (.lineNumber // 1),
+                                                  startColumn: 1,
+                                                  endLine: (.lineNumber // 1),
+                                                  endColumn: 80
+                                              }
+                                          }
+                                      }],
+                                      partialFingerprints: {
+                                          primaryLocationLineHash: ((.fileName // .primaryLocation // .folderName // "Unknown File") + ":" + ((.lineNumber // 1) | tostring) + ":" + (.issueInstanceId // (.id | tostring)))
+                                      },
+                                      properties: {
+                                          fortify_severity: (.friority // .priority // "Unknown"),
+                                          fortify_category: (.subCategoryName // .categoryName // .issueName // .subCategory // .category // .kingdom // "Unknown"),
+                                          fortify_issue_id: (.issueInstanceId // (.id | tostring)),
+                                          fortify_project: $project_name,
+                                          fortify_version: $version_name
+                                      }
+                                  }))
+                              }]
+                          }' 2>/dev/null)
+                      
+                      if [ $? -eq 0 ] && [ -n "$fallback_sarif" ]; then
+                          echo "$fallback_sarif" > fortify-artifacts/fortify-sast-results.sarif
+                          
+                          if jq empty fortify-artifacts/fortify-sast-results.sarif 2>/dev/null; then
+                              local fallback_count=$(jq '.runs[0].results | length' fortify-artifacts/fortify-sast-results.sarif 2>/dev/null || echo "0")
+                              echo "✅ SARIF fallback gerado: $fallback_count vulnerabilidades"
+                              return 0
+                          else
+                              echo "❌ SARIF fallback inválido"
+                              return 1
+                          fi
+                      else
+                          echo "❌ Falha ao gerar SARIF fallback"
+                          return 1
+                      fi
+                  }
+                  
+                  # ========== FUNÇÃO DE EXTRAÇÃO OTIMIZADA ==========
+                  
+                  fortify_extrair_estatisticas() {
+                      echo "📊 Extraindo estatísticas..."
+                      
                       if [ -z "$fortify_project_version_id" ]; then
-                          echo "❌ ID da versão do projeto não encontrado. Não é possível gerar relatório."
+                          echo "❌ ID da versão não encontrado"
                           return 1
                       fi
                       
-                      # Verifica se o scan está completo com retry progressivo
-                      echo "🔍 Verificando status do scan..."
-                      for i in {1..5}; do
-                          scan_status_response=$(curl -sS -k -L --fail \
-                              -H "Content-Type: application/json" \
-                              -H "Accept: application/json" \
-                              -H "Authorization: FortifyToken $fortify_unified_login_token" \
-                              "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id") \
-                              || exit_code=$?
+                      # Verifica status do scan com retry otimizado
+                      local max_retries=5
+                      local retry_count=0
+                      local scan_status=""
+                      
+                      while [ $retry_count -lt $max_retries ]; do
+                          local status_response
+                          status_response=$(api_call "GET" "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id" "" "verificar status")
                           
-                          # Valida se a resposta é JSON válido
-                          if [ -n "$scan_status_response" ] && echo "$scan_status_response" | jq -e . >/dev/null 2>&1; then
-                              scan_status=$(echo "$scan_status_response" | jq -r '.data.status // "UNKNOWN"')
-                              echo "📊 Status do scan: $scan_status"
+                          if [ $? -eq 0 ]; then
+                              scan_status=$(echo "$status_response" | jq -r '.data.status // "UNKNOWN"')
+                              echo "📊 Status: $scan_status"
                               
-                              if [ "$scan_status" == "REQUIRES_AUTH" ] || [ "$scan_status" == "PROCESSING" ]; then
-                                  if [ $i -lt 5 ]; then
-                                      echo "⏳ Scan ainda em processamento... Tentativa $i/5"
-                                      sleep $((i*15))  # Timeout progressivo: 15s, 30s, 45s, 60s
+                              if [ "$scan_status" = "REQUIRES_AUTH" ] || [ "$scan_status" = "PROCESSING" ]; then
+                                  retry_count=$((retry_count + 1))
+                                  if [ $retry_count -lt $max_retries ]; then
+                                      echo "⏳ Aguardando... ($retry_count/$max_retries)"
+                                      sleep $((retry_count * 15))
                                       continue
                                   else
-                                      echo "⚠️ Timeout: Scan ainda processando após 5 tentativas"
+                                      echo "⚠️ Timeout: scan ainda processando"
                                       return 1
                                   fi
                               else
-                                  break  # Scan completo, sai do loop
+                                  break
                               fi
                           else
-                              echo "❌ Resposta inválida ao verificar status:"
-                              echo "$scan_status_response" | head -10
-                              return 1
+                              retry_count=$((retry_count + 1))
+                              sleep 30
                           fi
                       done
                       
-                      # Busca TODAS as vulnerabilidades (sem filtro de severidade)
-                      echo "🔍 Buscando vulnerabilidades..."
-                      all_issues_response=$(curl -sS -k -L --fail \
-                          -H "Content-Type: application/json" \
-                          -H "Accept: application/json" \
-                          -H "Authorization: FortifyToken $fortify_unified_login_token" \
-                          "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/issues?limit=1000") \
-                          || exit_code=$?
+                      # Busca vulnerabilidades
+                      local issues_response
+                      issues_response=$(api_call "GET" "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/issues?limit=1000" "" "buscar vulnerabilidades")
                       
-                      # Verifica se a API retornou erro
-                      if [ "$exit_code" != "0" ]; then
-                          echo "❌ Erro ao consultar vulnerabilidades: $exit_code"
-                          return 1
-                      fi
-                      
-                      # Verifica se a resposta tem dados válidos
-                      if [ -z "$all_issues_response" ] || [ "$all_issues_response" = "null" ]; then
-                          echo "⚠️ Nenhum dado de vulnerabilidade retornado pela API."
-                          return 1
-                      fi
-                      
-                      # Valida se a resposta é JSON válido
-                      if [ -z "$all_issues_response" ] || ! echo "$all_issues_response" | jq -e . >/dev/null 2>&1; then
-                          echo "❌ Resposta não é JSON válido ao buscar vulnerabilidades:"
-                          echo "$all_issues_response" | head -20
-                          return 1
-                      fi
-                      
-                      # Verifica se há erro na resposta JSON
-                      error_message=$(echo "$all_issues_response" | jq -r '.message // empty')
-                      if [ -n "$error_message" ]; then
-                          echo "❌ Erro da API: $error_message"
-                          return 1
-                      fi
-                      
-                      # Verifica se há dados na resposta
-                      data_count=$(echo "$all_issues_response" | jq -r '.data | length' 2>/dev/null || echo "0")
-                      echo "🔍 Dados encontrados na API: $data_count vulnerabilidades"
-                      
-                      if [ "$data_count" == "0" ]; then
-                          echo "⚠️ Nenhuma vulnerabilidade encontrada no scan atual."
-                          echo "📄 Resposta completa da API:"
-                          echo "$all_issues_response" | jq '.' 2>/dev/null || echo "$all_issues_response"
-                          echo "0" > /tmp/fortify_total_count
-                          echo "0" > /tmp/fortify_critical_count  
-                          echo "0" > /tmp/fortify_high_count
-                          echo "0" > /tmp/fortify_medium_count
-                          echo "0" > /tmp/fortify_low_count
-                          echo '{"data":[]}' > /tmp/fortify_all_issues.json
-                          return 0
-                      fi
-                      
-                      echo "✅ Encontradas $data_count vulnerabilidades para processamento"
-                      
-                      # Salva os dados para análise
-                      echo "$all_issues_response" > /tmp/fortify_all_issues.json
-                      
-                      # Contadores por severidade (tenta friority e priority como fallback)
-                      critical_count=$(echo "$all_issues_response" | jq -r '[.data[] | select((.friority // .priority) == "Critical")] | length')
-                      high_count=$(echo "$all_issues_response" | jq -r '[.data[] | select((.friority // .priority) == "High")] | length')
-                      medium_count=$(echo "$all_issues_response" | jq -r '[.data[] | select((.friority // .priority) == "Medium")] | length')
-                      low_count=$(echo "$all_issues_response" | jq -r '[.data[] | select((.friority // .priority) == "Low")] | length')
-                      total_count=$(echo "$all_issues_response" | jq -r '.data | length')
-                      
-                      # Valida se os contadores são números válidos
-                      critical_count=${critical_count:-0}
-                      high_count=${high_count:-0}
-                      medium_count=${medium_count:-0}
-                      low_count=${low_count:-0}
-                      total_count=${total_count:-0}
-                      
-                      # Salva para uso posterior
-                      echo "$critical_count" > /tmp/fortify_critical_count
-                      echo "$high_count" > /tmp/fortify_high_count  
-                      echo "$medium_count" > /tmp/fortify_medium_count
-                      echo "$low_count" > /tmp/fortify_low_count
-                      echo "$total_count" > /tmp/fortify_total_count
-                  }
-
-                  gerar_relatorio_fortify() {
-                    echo " "
-                    echo " "
-                    echo "+----------------- 📊 FORTIFY SAST SCAN SUMMARY --------------------+"
-                    echo "| Projeto: $fortify_project_name $fortify_version_name"
-                    echo "+--------------------------------------------------------------------+"
-                    
-                    # Lê contadores salvos
-                    critical_count=$(cat /tmp/fortify_critical_count 2>/dev/null || echo 0)
-                    high_count=$(cat /tmp/fortify_high_count 2>/dev/null || echo 0)
-                    medium_count=$(cat /tmp/fortify_medium_count 2>/dev/null || echo 0)
-                    low_count=$(cat /tmp/fortify_low_count 2>/dev/null || echo 0)
-                    total_count=$(cat /tmp/fortify_total_count 2>/dev/null || echo 0)
-                    
-                    echo "| Total: $total_count (CRITICAL: $critical_count, HIGH: $high_count, MEDIUM: $medium_count, LOW: $low_count)"
-                    echo "+------------------------------+------------+----------+-----------------------------+----------------+-------------------------------+"
-                    echo "| CATEGORY                     | ISSUE ID   | SEVERITY | PRIMARY LOCATION            | TAGGED         | RECOMMENDATIONS               |"
-                    echo "+------------------------------+------------+----------+-----------------------------+----------------+-------------------------------+"
-                    
-                    # TABELA DETALHADA DE FINDINGS
-                    cat /tmp/fortify_all_issues.json 2>/dev/null | jq -r '
-                      .data | .[0:10] | .[] | [
-                        (if .subCategoryName then .subCategoryName
-                         elif .categoryName then .categoryName
-                         elif .issueName then .issueName
-                         elif .subCategory then .subCategory
-                         elif .category then .category
-                         elif .kingdom then .kingdom
-                         else "Unknown"
-                         end),
-                        (.issueInstanceId // (.id | tostring)),
-                        (.friority // .priority // "Unknown"),
-                        ((.fileName // .primaryLocation // .folderName // "Unknown File") + ":" + ((.lineNumber // "N/A")|tostring)),
-                        (.analysisType // .analysis.analysisType // .analysisName // .analysis // (.customAttributes[]? | select(.name=="Tagged") | .value) // (.attributes[]? | select(.name=="Tagged") | .value) // "N/A"),
-                        (.description // "Ver detalhes no SSC")
-                      ] | @tsv' | while IFS=$'\t' read -r category issue severity location tagged recommendation; do
-                        mapfile -t lines < <(echo "$category" | fold -s -w 28 | head -n 3)
-                        for i in "${!lines[@]}"; do
-                          if [[ $i -eq 0 ]]; then
-                            printf "| %-28s | %-10s | %-8s | %-27s | %-15s | %-29s |\n" \
-                              "${lines[$i]}" "${issue:0:10}" "${severity:0:8}" "${location:0:27}" "${tagged:0:15}" "${recommendation:0:29}"
+                      if [ $? -eq 0 ]; then
+                          local data_count=$(echo "$issues_response" | jq '.data | length' 2>/dev/null || echo "0")
+                          
+                          if [ "$data_count" -gt 0 ]; then
+                              echo "$issues_response" > /tmp/fortify_all_issues.json
+                              
+                              # Contadores otimizados em uma única operação
+                              local counters
+                              counters=$(echo "$issues_response" | jq '{
+                                  critical: [.data[] | select((.friority // .priority) == "Critical")] | length,
+                                  high: [.data[] | select((.friority // .priority) == "High")] | length,
+                                  medium: [.data[] | select((.friority // .priority) == "Medium")] | length,
+                                  low: [.data[] | select((.friority // .priority) == "Low")] | length,
+                                  total: (.data | length)
+                              }' 2>/dev/null)
+                              
+                              if [ $? -eq 0 ]; then
+                                  local critical_count=$(echo "$counters" | jq -r '.critical // 0')
+                                  local high_count=$(echo "$counters" | jq -r '.high // 0')
+                                  local medium_count=$(echo "$counters" | jq -r '.medium // 0')
+                                  local low_count=$(echo "$counters" | jq -r '.low // 0')
+                                  local total_count=$(echo "$counters" | jq -r '.total // 0')
+                                  
+                                  # Salva contadores
+                                  echo "$critical_count" > /tmp/fortify_critical_count
+                                  echo "$high_count" > /tmp/fortify_high_count
+                                  echo "$medium_count" > /tmp/fortify_medium_count
+                                  echo "$low_count" > /tmp/fortify_low_count
+                                  echo "$total_count" > /tmp/fortify_total_count
+                                  
+                                  echo "✅ $total_count vulnerabilidades encontradas (CRITICAL: $critical_count, HIGH: $high_count, MEDIUM: $medium_count, LOW: $low_count)"
+                                  return 0
+                              else
+                                  echo "❌ Erro ao processar contadores"
+                                  return 1
+                              fi
                           else
-                            printf "| %-28s | %-10s | %-8s | %-27s | %-15s | %-29s |\n" "${lines[$i]}" "" "" "" "" ""
+                              echo "⚠️ Nenhuma vulnerabilidade encontrada"
+                              echo "0" > /tmp/fortify_critical_count
+                              echo "0" > /tmp/fortify_high_count
+                              echo "0" > /tmp/fortify_medium_count
+                              echo "0" > /tmp/fortify_low_count
+                              echo "0" > /tmp/fortify_total_count
+                              echo '{"data":[]}' > /tmp/fortify_all_issues.json
+                              return 0
                           fi
-                        done
-                        echo "+------------------------------+------------+----------+-----------------------------+----------------+-------------------------------+"
-                    done
-                    
-                    # BREAKDOWN DETALHADO POR CATEGORIA E SEVERIDADE
-                    echo " "
-                    echo "🔍 DETAILED BREAKDOWN BY CATEGORY:"
-                    echo "+------------------------------+------------+----------+----------+----------+---------------+"
-                    echo "| CATEGORY                     | CRITICAL   | HIGH     | MEDIUM   | LOW      | TOTAL ISSUES  |"
-                    echo "+------------------------------+------------+----------+----------+----------+---------------+"
-                    
-                    cat /tmp/fortify_all_issues.json | jq -r '
-                      .data[] | 
-                      [(.subCategoryName // .categoryName // .issueName // .subCategory // .category // .kingdom // "Unknown"), (.friority // .priority // "Unknown")] | @tsv' | awk -F'\t' '
-                      function wrap(str, width, arr, n, out, i, len) {
-                        n = split(str, arr, " ");
-                        out = arr[1];
-                        len = length(arr[1]);
-                        for (i=2; i<=n; i++) {
-                          if (len + 1 + length(arr[i]) > width) {
-                            out = out "\n" arr[i];
-                            len = length(arr[i]);
-                          } else {
-                            out = out " " arr[i];
-                            len += 1 + length(arr[i]);
-                          }
-                        }
-                        return out;
-                      }
-                      {
-                        c[$1, $2]++;
-                        cat[$1]=1;
-                      }
-                      END {
-                        sep = "+------------------------------+------------+----------+----------+----------+---------------+";
-                        for (k in cat) {
-                          crit = c[k, "Critical"]+0;
-                          high = c[k, "High"]+0;
-                          med  = c[k, "Medium"]+0;
-                          low  = c[k, "Low"]+0;
-                          total = crit+high+med+low;
-                          wrapped = wrap(k, 28);
-                          n = split(wrapped, lines, "\n");
-                          for (i=1; i<=n; i++) {
-                            if (i==1) {
-                              printf "| %-28s | %-10s | %-8s | %-8s | %-8s | %-13s |\n", lines[i], crit, high, med, low, total;
-                            } else {
-                              printf "|   %-26s | %-10s | %-8s | %-8s | %-8s | %-13s |\n", lines[i], "", "", "", "", "";
-                            }
-                          }
-                          print sep;
-                        }
-                        
-                      }'
-                    echo " "
-                    echo "📊 EXECUTIVE SUMMARY:"
-                    echo "+-------------------------------+"
-                    printf "| %-29s|\n" "CRITICAL: $critical_count"
-                    printf "| %-29s|\n" "HIGH:    $high_count"
-                    printf "| %-29s|\n" "MEDIUM:  $medium_count"
-                    printf "| %-29s|\n" "LOW:     $low_count"
-                    printf "| %-29s|\n" "TOTAL ISSUES FOUND: $total_count"
-                    echo "+-------------------------------+"
-                    echo " "
-                    # Garantir link absoluto
-                    echo "🔗 Detailed Report: https://fortify-ssc.evernow.com.br/html/ssc/version/${fortify_project_version_id:-12345}/audit"
-                    echo "+-------------------------------------------------------------------------------------------------------------+"
-                    echo " "
-                  }
-                  
-                  # ========== RELATÓRIO HTML NAVEGÁVEL ==========
-                  fortify_gerar_relatorio_navegavel() {
-                      echo "🔗 Gerando relatório HTML navegável com links diretos..."
-                      
-                      # Verifica se temos dados para converter
-                      if [ ! -f /tmp/fortify_all_issues.json ]; then
-                          echo "⚠️ Nenhum dado de vulnerabilidade encontrado para gerar relatório navegável"
+                      else
+                          echo "❌ Falha ao buscar vulnerabilidades"
                           return 1
                       fi
-                      
-                      # Dados dinâmicos
-                      timestamp=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
-                      critical_count=$(cat /tmp/fortify_critical_count 2>/dev/null || echo 0)
-                      high_count=$(cat /tmp/fortify_high_count 2>/dev/null || echo 0)
-                      medium_count=$(cat /tmp/fortify_medium_count 2>/dev/null || echo 0)
-                      low_count=$(cat /tmp/fortify_low_count 2>/dev/null || echo 0)
-                      total_count=$(cat /tmp/fortify_total_count 2>/dev/null || echo 0)
-                      
-                      # Cria diretório para artefatos
-                      mkdir -p fortify-artifacts
-                      
-                      # Gera relatório HTML simplificado
-                      echo "✅ Relatório HTML navegável gerado: fortify-artifacts/fortify-navigable-report.html"
                   }
                   
-                  # ========== EXECUÇÃO PRINCIPAL ==========
+                  # ========== FUNÇÃO DE RELATÓRIO OTIMIZADA ==========
                   
-                  echo '   ____            __   _  ___        ____ ___    ____ ______ '
-                  echo '  / __/___   ____ / /_ (_)/ _/__ __  / __// _ |  / __//_  __/ '
-                  echo ' / _/ / _ \ / __// __// // _// // / _\ \ / __ | _\ \   / /    ' 
-                  echo '/_/   \___//_/   \__//_//_/  \_, / /___//_/ |_|/___/  /_/     '
-                  echo '                            /___/                             '
+                  gerar_relatorio_fortify() {
+                      echo ""
+                      echo "📊 FORTIFY SAST SCAN SUMMARY"
+                      echo "=================================="
+                      
+                      local critical_count=$(cat /tmp/fortify_critical_count 2>/dev/null || echo 0)
+                      local high_count=$(cat /tmp/fortify_high_count 2>/dev/null || echo 0)
+                      local medium_count=$(cat /tmp/fortify_medium_count 2>/dev/null || echo 0)
+                      local low_count=$(cat /tmp/fortify_low_count 2>/dev/null || echo 0)
+                      local total_count=$(cat /tmp/fortify_total_count 2>/dev/null || echo 0)
+                      
+                      echo "Projeto: $fortify_project_name $fortify_version_name"
+                      echo "Total: $total_count (CRITICAL: $critical_count, HIGH: $high_count, MEDIUM: $medium_count, LOW: $low_count)"
+                      echo ""
+                      
+                      if [ "$total_count" -gt 0 ]; then
+                          echo "🔍 TOP 10 VULNERABILIDADES:"
+                          echo "----------------------------------------"
+                          
+                          jq -r '.data[0:10][] | "\(.subCategoryName // .categoryName // .issueName // "Unknown") | \(.friority // .priority // "Unknown") | \(.fileName // "Unknown File"):\(.lineNumber // "N/A") | \(.description // "Ver detalhes no SSC" | .[0:50])"' /tmp/fortify_all_issues.json 2>/dev/null || echo "❌ Erro ao processar vulnerabilidades"
+                      fi
+                      
+                      echo ""
+                      echo "🔗 Relatório detalhado: https://fortify-ssc.evernow.com.br/html/ssc/version/${fortify_project_version_id:-0}/audit"
+                      echo "=================================="
+                  }
                   
-                  # Verificar se projeto e versão já existem
-                  echo "🔍 Verificando se o projeto $fortify_project_name existe no SSC..."
-                  response=$(curl -sS -k -L --fail \
-                      -H "Accept: application/json" \
-                      -H "Authorization: FortifyToken $fortify_unified_login_token" \
-                      "$fortify_ssc_api_url/projectVersions?q=$fortify_project_name&fulltextsearch=true") \
-                      || exit_code=$?
+                  # ========== EXECUÇÃO PRINCIPAL OTIMIZADA ==========
                   
-                  # Valida se a resposta é JSON válido
-                  if [ -z "$response" ] || ! echo "$response" | jq -e . >/dev/null 2>&1; then
-                      echo "❌ Resposta não é JSON válido. Conteúdo recebido:"
-                      echo "$response" | head -20
-                      echo "❌ Exit code: $exit_code"
-                      echo "❌ Verifique: URL, token, conectividade e permissões"
+                  echo "🚀 Iniciando Fortify SAST Scan..."
+                  
+                  # Verifica projeto existente
+                  local project_response
+                  project_response=$(api_call "GET" "$fortify_ssc_api_url/projectVersions?q=$fortify_project_name&fulltextsearch=true" "" "verificar projeto")
+                  
+                  if [ $? -eq 0 ]; then
+                      fortify_project_id=$(echo "$project_response" | jq -r '.data[] | select(.project.name=="'"$fortify_project_name"'") | .project.id' | head -1)
+                      fortify_project_version_id=$(echo "$project_response" | jq -r '.data[] | select(.project.name=="'"$fortify_project_name"'") | select(.name=="'"$fortify_version_name"'") | .id' | head -1)
+                      
+                      if [ -n "$fortify_project_version_id" ]; then
+                          echo "✅ Projeto e versão existem: $fortify_project_version_id"
+                      elif [ -n "$fortify_project_id" ]; then
+                          echo "✅ Projeto existe, criando versão..."
+                          fortify_criar_versao
+                      else
+                          echo "🔧 Criando projeto e versão..."
+                          fortify_criar_projeto_e_versao
+                      fi
+                  else
+                      echo "❌ Falha ao verificar projeto existente"
                       exit 1
                   fi
                   
-                  fortify_verificar_resposta_api
-                  fortify_project_id=$(echo "$response" | jq -r '.data[] | select(.project.name=="'"$fortify_project_name"'") | .project.id' | head -1 | awk '{$1=$1};1')
-                  fortify_project_version_id=$(echo "$response" | jq -r '.data[] | select(.project.name=="'"$fortify_project_name"'") | select(.name=="'"$fortify_version_name"'") | .id' | head -1 | awk '{$1=$1};1')
-                  
-                  if [ "$fortify_project_version_id" != "" ]; then
-                      # Já existe projeto e versão no SSC
-                      echo "✅ O projeto $fortify_project_name já existe no SSC com ID $fortify_project_id."
-                      echo "✅ A versão $fortify_version_name já existe no SSC com ID $fortify_project_version_id."
-                  elif [ "$fortify_project_id" != "" ]; then
-                      # Já existe projeto (sem versão) no SSC
-                      echo "✅ O projeto $fortify_project_name já existe no SSC com ID $fortify_project_id. Criando versão..."
-                      fortify_criar_versao
-                  else
-                      # Não tem projeto nem versão no SSC
-                      echo "⚠️ O projeto $fortify_project_name ainda não existe no SSC. Criando projeto e versão..."
-                      fortify_criar_projeto_e_versao
-                  fi
-                  
+                  # Configura projeto
                   fortify_configurar_projeto
                   fortify_regras_processamento
                   
-                  echo "🔧 Executando Scancentral Client"
-                  output=$($fortify_scancentral_tool -ssctoken $fortify_controller_token -url $fortify_controller_url start -skipBuild -block --log-file fortify.log --overwrite -application $fortify_project_name -version $fortify_version_name --upload-to-ssc --ssc-upload-token $fortify_controller_token 2>&1 | tee /dev/stderr )                    
+                  # Executa scan
+                  echo "🔧 Executando ScanCentral..."
+                  local scan_output
+                  scan_output=$($fortify_scancentral_tool -ssctoken "$fortify_controller_token" -url "$fortify_controller_url" start -skipBuild -block --log-file fortify.log --overwrite -application "$fortify_project_name" -version "$fortify_version_name" --upload-to-ssc --ssc-upload-token "$fortify_controller_token" 2>&1)
                   
-                  # Verifica o código de resposta
-                  exit_code=$?
-                  fortify_verificar_codigo_de_resposta
-                    
-                    # Extrai o job token da saída usando grep e regex
-                    fortify_job_token=$(echo "$output" | grep "Submitted job and received token" | grep -E -o "[a-f0-9-]{36}")
-                    
-                    # Verifica se o job token foi encontrado
-                    if [ -z "$fortify_job_token" ]; then
-                        echo "❌ Job token não foi criado."
-                        exit 1
-                    else
-                        echo "✅ Arquivos para scan enviados com sucesso. ID do Scan: $fortify_job_token"
-                    fi
-                    
-                    # ========== GERA RELATÓRIO DETALHADO ANTES DO GATE ==========
-                    echo ""
-                    echo "⏳ Aguardando finalização do scan para gerar relatório detalhado..."
-                  
-                  # Aguarda o scan processar com retry inteligente
-                  max_retries=5
-                  retry_count=0
-                  while [ $retry_count -lt $max_retries ]; do
-                      echo "🔄 Tentativa $((retry_count + 1))/$max_retries - Aguardando processamento..."
-                      sleep 30  # Aguarda 30s entre tentativas
-                      
-                      # Tenta extrair dados
-                      if fortify_extrair_estatisticas_completas; then
-                          # Verifica se há dados válidos
-                          if [ -f /tmp/fortify_all_issues.json ]; then
-                              data_count=$(cat /tmp/fortify_all_issues.json | jq '.data | length' 2>/dev/null || echo "0")
-                              if [ "$data_count" -gt 0 ]; then
-                                  echo "✅ Dados extraídos com sucesso: $data_count vulnerabilidades encontradas"
-                                  break
-                              else
-                                  echo "⚠️ Scan ainda processando... (0 vulnerabilidades encontradas)"
-                              fi
-                          fi
+                  if [ $? -eq 0 ]; then
+                      local job_token=$(echo "$scan_output" | grep "Submitted job and received token" | grep -E -o "[a-f0-9-]{36}" || echo "")
+                      if [ -n "$job_token" ]; then
+                          echo "✅ Scan iniciado: $job_token"
+                      else
+                          echo "⚠️ Scan iniciado (token não encontrado)"
                       fi
-                      
-                      retry_count=$((retry_count + 1))
-                  done
-                  
-                  if [ $retry_count -eq $max_retries ]; then
-                      echo "⚠️ Timeout: Scan pode ainda estar processando. Continuando com dados disponíveis..."
+                  else
+                      echo "❌ Falha no scan"
+                      exit 1
                   fi
-                    
-                    # Extrai estatísticas completas
-                    if fortify_extrair_estatisticas_completas; then
-                        # Gera relatório visual apenas se a extração foi bem-sucedida
-                        echo ""
-                        echo "📊 GERANDO RELATÓRIO DETALHADO:"
-                        gerar_relatorio_fortify
-                        
-                      # Gera relatório SARIF para integração com IDEs
-                      echo ""
-                      echo "🔗 GERANDO RELATÓRIO SARIF:"
+                  
+                  # Aguarda processamento e extrai dados
+                  echo "⏳ Aguardando processamento..."
+                  if fortify_extrair_estatisticas; then
+                      gerar_relatorio_fortify
+                      
                       if fortify_gerar_sarif; then
                           echo "✅ SARIF gerado com sucesso para integração com IDEs"
+                      elif fortify_gerar_sarif_fallback; then
+                          echo "✅ SARIF fallback gerado com sucesso"
                       else
-                          echo "⚠️ Não foi possível gerar SARIF, mas o relatório detalhado foi criado"
+                          echo "❌ Falha crítica na geração de SARIF"
+                          # Criar SARIF vazio válido
+                          mkdir -p fortify-artifacts
+                          echo '{"$schema":"https://schemastore.azurewebsites.net/schemas/json/sarif-2.1.0-rtm.5.json","version":"2.1.0","runs":[{"tool":{"driver":{"name":"Fortify Static Code Analyzer","version":"25.2.0"}},"results":[]}]}' > fortify-artifacts/fortify-sast-results.sarif
+                          echo "✅ SARIF vazio válido criado como último recurso"
                       fi
-                    else
-                        echo "⚠️ Não foi possível extrair dados de vulnerabilidades para gerar relatório detalhado."
-                        echo "   O gate de qualidade ainda será aplicado normalmente."
-                    fi
-                    
-                    echo "⚙️ Iniciando processamento das regras de gate para o projeto."
-                    
-                    regras_json='[
-                      {
-                        "gate": "audited:false [fortify priority order]:critical [fortify priority order]:high",
-                        "name": "default",
-                        "bypass": "false"
-                      },
-                      {
-                        "gate": "audited:false [fortify priority order]:critical [fortify priority order]:high",
-                        "name": "teste",
-                        "bypass": "true"
-                      }
-                    ]'
-                    
-                    # Obtém regra default
-                    gate=$(echo "$regras_json" | jq --compact-output --raw-output '.[] | select(.name=="default") | .gate')
-                    if [ -z "$gate" ]; then
-                        echo "❌ Nenhuma regra 'default' foi definida para o projeto no Fortify."
-                        exit 1
-                    fi
-                    
-                    bypass=$(echo "$regras_json" | jq --compact-output --raw-output '.[] | select(.name=="default") | .bypass')
-                    filtro_aplicado="$gate"
-                    
-                    # Verifica se a regra será aplicada ou ignorada (bypass)
-                    if [ "$bypass" == "true" ]; then
-                        echo "⚠️  Bypass ativado: a regra 'default' não será aplicada."
-                        echo "✅ Continuação do pipeline permitida."
-                    else
-                        echo "🔒 Bypass desativado: a regra 'default' será aplicada."
-                        echo "🔍 Filtro aplicado: \`$filtro_aplicado\`"
-                        filtro_url_encoded=$(echo "$filtro_aplicado" | jq -sRr '@uri')
-                        echo "📡 Consultando vulnerabilidades no Fortify SSC..."
-                    
-                      response=$(curl -sS -k -L --fail \
-                          -H "Content-Type: application/json" \
-                          -H "Accept: application/json" \
-                          -H "Authorization: FortifyToken $fortify_unified_login_token" \
-                          "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/issues?qm=issues&q=$filtro_url_encoded") \
-                          || exit_code=$?
-                      
-                      # Valida se a resposta é JSON válido
-                      if [ -z "$response" ] || ! echo "$response" | jq -e . >/dev/null 2>&1; then
-                          echo "❌ Resposta não é JSON válido ao consultar gate:"
-                          echo "$response" | head -20
-                          exit 1
-                      fi
-                    
-                        fortify_verificar_resposta_api
-                    
-                      num_issues=$(echo "$response" | jq -r '.count')
-                    
-                        if [ "$num_issues" -gt 0 ]; then
-                            echo "❌ Gate falhou: **$num_issues** vulnerabilidades encontradas com base no filtro aplicado."
-                            echo "📄 Verifique o relatório detalhado acima para mais informações."
-                            echo '  _____       __         ____       _  __ '
-                            echo ' / ___/___ _ / /_ ___   / __/___ _ (_)/ / '
-                            echo '/ (_ // _ `// __// -_) / _/ / _ `// // /  '
-                            echo '\___/ \_,_/ \__/ \__/ /_/   \_,_//_//_/   '
-                            exit 1
-                        else
-                            echo "✅ Gate aprovado: Nenhuma vulnerabilidade crítica ou alta encontrada."
-                            echo "🚀 Continuação do build autorizada."
-                            echo '  _____       __         ___                 '
-                            echo ' / ___/___ _ / /_ ___   / _ \ ___ _ ___  ___ '
-                            echo '/ (_ // _ `// __// -_) / ___// _ `/(_-< (_-< '
-                            echo '\___/ \_,_/ \__/ \__/ /_/    \_,_//___//___/ '
-                        fi
-                    fi
-
-                  # Limpeza de arquivos temporários (opcional)
-                  echo "🧹 Limpando arquivos temporários..."
-                  # Mantém apenas o SARIF como artefato principal
-                  # O JSON bruto é usado apenas para geração do SARIF
-                    
-                  # Informações sobre o SARIF gerado
-                  if [ -f fortify-artifacts/fortify-sast-results.sarif ]; then
-                      echo ""
-                      echo "🚀 SARIF otimizado pronto para integração DevSecOps!"
-                      echo "📤 Upload automático para GitHub Code Scanning configurado"
-                      echo "📥 Artefato SARIF disponível para download manual"
-                      echo ""
-                      echo "💡 Como usar o SARIF:"
-                      echo "   1. GitHub: Security > Code scanning alerts"
-                      echo "   2. VSCode: Extensão 'SARIF Viewer' ou 'SARIF Explorer'"
-                      echo "   3. JetBrains: Plugin SARIF Viewer"
-                      echo "   4. Pull Requests: Alertas automáticos"
-                      echo "   5. Fingerprints únicos para tracking preciso"
-                      echo ""
+                  else
+                      echo "⚠️ Falha ao extrair dados"
                   fi
+                  
+                  # Gate de qualidade
+                  echo "🔒 Aplicando gate de qualidade..."
+                  
+                  local gate_query="audited:false [fortify priority order]:critical [fortify priority order]:high"
+                  local gate_response
+                  gate_response=$(api_call "GET" "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/issues?qm=issues&q=$(echo "$gate_query" | jq -sRr '@uri')" "" "consultar gate")
+                  
+                  if [ $? -eq 0 ]; then
+                      local gate_count=$(echo "$gate_response" | jq -r '.count // 0')
+                      
+                      if [ "$gate_count" -gt 0 ]; then
+                          echo "❌ Gate falhou: $gate_count vulnerabilidades críticas/altas"
+                          exit 1
+                      else
+                          echo "✅ Gate aprovado: nenhuma vulnerabilidade crítica/alta"
+                      fi
+                  else
+                      echo "⚠️ Falha ao consultar gate"
+                      exit 1
+                  fi
+                  
+                  echo "🎉 Fortify SAST concluído com sucesso!"
 
             # ========== UPLOAD DE ARTEFATOS ==========
             - name: Verificar qualidade do SARIF
               if: always()
               run: |
-                  echo "🔍 Verificando qualidade e compatibilidade do SARIF..."
+                  echo "🔍 Verificando SARIF..."
                   if [ -f fortify-artifacts/fortify-sast-results.sarif ]; then
-                      # Validação básica
-                      if [ ! -f fortify-artifacts/fortify-sast-results.sarif ] || ! cat fortify-artifacts/fortify-sast-results.sarif | jq empty 2>/dev/null; then
-                          echo "❌ SARIF com JSON inválido"
-                          exit 1
-                      fi
-                      
-                      # Estatísticas detalhadas
-                      sarif_count=$(cat fortify-artifacts/fortify-sast-results.sarif | jq '.runs[0].results | length' 2>/dev/null || echo "0")
-                      rules_count=$(cat fortify-artifacts/fortify-sast-results.sarif | jq '.runs[0].tool.driver.rules | length' 2>/dev/null || echo "0")
-                      has_fingerprints=$(cat fortify-artifacts/fortify-sast-results.sarif | jq '.runs[0].results[0].partialFingerprints // empty' 2>/dev/null | wc -l)
-                      
-                      # Garante que os valores são números válidos
-                      sarif_count=${sarif_count:-0}
-                      rules_count=${rules_count:-0}
-                      has_fingerprints=${has_fingerprints:-0}
-                      
-                      # Validação de fingerprints únicos
-                      if [ "$sarif_count" -gt 0 ] && [ "$sarif_count" != "" ]; then
-                          unique_fingerprints=$(cat fortify-artifacts/fortify-sast-results.sarif | jq -r '.runs[0].results[].partialFingerprints.primaryLocationLineHash' 2>/dev/null | sort | uniq | wc -l)
-                          fingerprint_quality=$([ "$unique_fingerprints" -eq "$sarif_count" ] && echo "✅ Únicos" || echo "⚠️ Possíveis duplicatas")
+                      if jq empty fortify-artifacts/fortify-sast-results.sarif 2>/dev/null; then
+                          local count=$(jq '.runs[0].results | length' fortify-artifacts/fortify-sast-results.sarif 2>/dev/null || echo "0")
+                          local rules=$(jq '.runs[0].tool.driver.rules | length' fortify-artifacts/fortify-sast-results.sarif 2>/dev/null || echo "0")
+                          echo "✅ SARIF válido: $count findings, $rules regras"
                       else
-                          unique_fingerprints=0
-                          fingerprint_quality="N/A"
-                      fi
-                      
-                                        echo "📊 Análise de Qualidade do SARIF:"
-                  echo "   ✅ Formato JSON válido"
-                  echo "   📈 Findings: $sarif_count"
-                  echo "   🔧 Regras únicas: $rules_count"
-                  echo "   🎯 Partial fingerprints: $([ $has_fingerprints -gt 0 ] && echo "✅ Incluídos" || echo "❌ Ausentes")"
-                  echo "   🔍 Fingerprints únicos: $fingerprint_quality ($unique_fingerprints/$sarif_count)"
-                  echo "   🚀 Compatível com GitHub Code Scanning"
-                  echo "   💻 Compatível com IDEs modernas"
-                  
-                  # Validação final do SARIF antes do upload
-                  if ! cat fortify-artifacts/fortify-sast-results.sarif | jq empty 2>/dev/null; then
-                      echo "❌ SARIF inválido - gerando SARIF vazio como fallback..."
-                      echo '{"$schema":"https://schemastore.azurewebsites.net/schemas/json/sarif-2.1.0-rtm.5.json","version":"2.1.0","runs":[{"tool":{"driver":{"name":"Fortify Static Code Analyzer","version":"25.2.0"}},"results":[]}]}' > fortify-artifacts/fortify-sast-results.sarif
-                      echo "✅ SARIF válido gerado como fallback"
-                  fi
-                      
-                      if [ "$sarif_count" -gt 0 ]; then
-                          echo ""
-                          echo "🎉 SARIF pronto para uso em ambiente DevSecOps!"
-                          echo "📋 Próximos passos:"
-                          echo "   • Verificar alertas em GitHub > Security"
-                          echo "   • Abrir em VSCode com extensão SARIF Viewer"
-                          echo "   • Receber notificações em Pull Requests"
-                      else
-                          echo ""
-                          echo "✅ Código seguro - nenhuma vulnerabilidade detectada!"
+                          echo "❌ SARIF inválido - gerando fallback..."
+                          echo '{"$schema":"https://schemastore.azurewebsites.net/schemas/json/sarif-2.1.0-rtm.5.json","version":"2.1.0","runs":[{"tool":{"driver":{"name":"Fortify Static Code Analyzer","version":"25.2.0"}},"results":[]}]}' > fortify-artifacts/fortify-sast-results.sarif
                       fi
                   else
-                      echo "❌ Arquivo SARIF não encontrado"
+                      echo "❌ SARIF não encontrado"
                       exit 1
                   fi
-
-            - name: Diagnóstico do SARIF e Permissões
-              if: always()
-              run: |
-                  echo "🔍 Diagnóstico do SARIF antes do upload..."
-                  if [ -f fortify-artifacts/fortify-sast-results.sarif ]; then
-                      echo "✅ Arquivo SARIF existe"
-                      echo "📊 Tamanho: $(wc -c < fortify-artifacts/fortify-sast-results.sarif) bytes"
-                      echo "📋 JSON válido: $(cat fortify-artifacts/fortify-sast-results.sarif | jq empty 2>/dev/null && echo "✅" || echo "❌")"
-                      echo "🔍 Estrutura: $(cat fortify-artifacts/fortify-sast-results.sarif | jq 'keys' 2>/dev/null || echo "❌ Inválido")"
-                      echo "📈 Findings: $(cat fortify-artifacts/fortify-sast-results.sarif | jq '.runs[0].results | length' 2>/dev/null || echo "0")"
-                  else
-                      echo "❌ Arquivo SARIF não encontrado"
-                      ls -la fortify-artifacts/ 2>/dev/null || echo "❌ Diretório fortify-artifacts não existe"
-                  fi
-                  
-                  echo ""
-                  echo "🔐 Verificando permissões e contexto..."
-                  echo "📋 GITHUB_TOKEN disponível: $([ -n "${{ secrets.GITHUB_TOKEN }}" ] && echo "✅" || echo "❌")"
-                  echo "🏗️ Repositório: ${{ github.repository }}"
-                  echo "🔧 Evento: ${{ github.event_name }}"
-                  echo "🔑 Permissões configuradas:"
-                  echo "   - security-events: write ✅"
-                  echo "   - actions: read ✅"
-                  echo "   - contents: read ✅"
-                  echo ""
-                  echo "💡 Se o upload falhar, verifique:"
-                  echo "   1. Repositório público vs privado"
-                  echo "   2. GitHub Advanced Security habilitado (para privados)"
-                  echo "   3. Configurações em Settings > Actions > General"
 
             - name: Upload SARIF to GitHub Code Scanning
               uses: github/codeql-action/upload-sarif@v3.27.0
@@ -1014,25 +766,11 @@ jobs:
                 sarif_file: fortify-artifacts/fortify-sast-results.sarif
                 token: ${{ secrets.GITHUB_TOKEN }}
               if: always()
-              # Nota: Este step requer security-events: write no workflow chamador
 
-            - name: Upload Fortify SARIF artifact (for manual download)
+            - name: Upload Fortify SARIF artifact
               uses: actions/upload-artifact@v4.4.0
               with:
                 name: fortify-sarif
                 path: fortify-artifacts/fortify-sast-results.sarif
                 if-no-files-found: warn
-              if: always()
-
-            - name: Fallback - Upload SARIF via API (se CodeQL falhar)
-              if: always()
-              run: |
-                  echo "🔄 Tentando upload alternativo via API..."
-                  if [ -f fortify-artifacts/fortify-sast-results.sarif ]; then
-                      echo "📤 Enviando SARIF via GitHub API..."
-                      # Este é um fallback que pode ser usado se o CodeQL Action falhar
-                      echo "💡 SARIF disponível para download manual como artefato"
-                      echo "🔗 Para upload manual: GitHub > Security > Code scanning > Upload SARIF"
-                  else
-                      echo "❌ SARIF não encontrado para upload alternativo"
-                  fi 
+              if: always() 

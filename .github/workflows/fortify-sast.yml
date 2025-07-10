@@ -28,11 +28,16 @@ on:
             FORTIFY_CONTROLLER_TOKEN:
                 required: true
 
-# ✅ PERMISSÕES ESPECÍFICAS PARA CODE SCANNING
+# ✅ PERMISSÕES MÍNIMAS PARA WORKFLOW REUTILIZÁVEL
+# Nota: O workflow chamador deve definir as permissões necessárias:
+# permissions:
+#   security-events: write  # Para upload SARIF
+#   actions: read           # Para metadados do workflow
+#   contents: read          # Para acessar código fonte
 permissions:
-    actions: read          # Para metadados do workflow
+    actions: none          # Workflow reutilizável não define permissões especiais
     contents: read         # Para acessar código fonte  
-    security-events: write # Para upload SARIF
+    security-events: none  # Permissões serão definidas pelo workflow chamador
 
 jobs:
     scan:
@@ -1009,6 +1014,7 @@ jobs:
                 sarif_file: fortify-artifacts/fortify-sast-results.sarif
                 token: ${{ secrets.GITHUB_TOKEN }}
               if: always()
+              # Nota: Este step requer security-events: write no workflow chamador
 
             - name: Upload Fortify SARIF artifact (for manual download)
               uses: actions/upload-artifact@v4.4.0

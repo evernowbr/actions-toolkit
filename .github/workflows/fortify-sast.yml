@@ -28,12 +28,6 @@ on:
             FORTIFY_CONTROLLER_TOKEN:
                 required: true
 
-
-permissions:
-    actions: none
-    contents: read
-    security-events: write 
-
 jobs:
     scan:
         name: Fortify SAST Scan

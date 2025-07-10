@@ -330,8 +330,7 @@ jobs:
                                   locations: [{
                                       physicalLocation: {
                                           artifactLocation: { 
-                                              uri: (.fileName // .primaryLocation // .folderName // "Unknown File"),
-                                              uriBaseId: "SRCROOT"
+                                              uri: (.fileName // .primaryLocation // .folderName // "Unknown File")
                                           },
                                           region: { 
                                               startLine: (.lineNumber // 1), 
@@ -375,11 +374,6 @@ jobs:
                           '{
                               "$schema": $schema,
                               "version": $version,
-                              "originalUriBaseIds": {
-                                  "SRCROOT": {
-                                      "uri": "file:///github/workspace/"
-                                  }
-                              },
                               "runs": [
                                   {
                                       "tool": {
@@ -453,11 +447,6 @@ jobs:
                           '{
                               "$schema": "https://schemastore.azurewebsites.net/schemas/json/sarif-2.1.0-rtm.5.json",
                               "version": "2.1.0",
-                              "originalUriBaseIds": {
-                                  "SRCROOT": {
-                                      "uri": "file:///github/workspace/"
-                                  }
-                              },
                               "runs": [{
                                   "tool": {
                                       "driver": {
@@ -483,8 +472,7 @@ jobs:
                                       locations: [{
                                           physicalLocation: {
                                               artifactLocation: { 
-                                                  uri: (.fileName // .primaryLocation // .folderName // "Unknown File"),
-                                                  uriBaseId: "SRCROOT"
+                                                  uri: (.fileName // .primaryLocation // .folderName // "Unknown File")
                                               },
                                               region: { 
                                                   startLine: (.lineNumber // 1),
@@ -758,12 +746,7 @@ jobs:
                       exit 1
                   fi
 
-            - name: Upload SARIF to GitHub Code Scanning
-              uses: github/codeql-action/upload-sarif@v3.27.0
-              with:
-                sarif_file: fortify-artifacts/fortify-sast-results.sarif
-                token: ${{ secrets.GITHUB_TOKEN }}
-              if: always()
+
 
             - name: Upload Fortify SARIF artifact
               uses: actions/upload-artifact@v4.4.0

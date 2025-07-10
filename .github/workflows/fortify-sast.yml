@@ -33,9 +33,13 @@ jobs:
         name: Fortify SAST Scan
         runs-on: self-hosted
         timeout-minutes: 45
+        permissions:
+            actions: read
+            contents: read
+            security-events: write
 
         steps:
-            - name: Run Scan
+            - name: FortifyScan Sast
               env:
                   fortify_project_name: ${{ inputs.name }}
                   fortify_version_name: ${{ inputs.version }}
@@ -77,6 +81,7 @@ jobs:
                       fi
                       
                       return 0
+                  }
                   }
                   
                   # Função segura para chamadas API
@@ -130,10 +135,10 @@ jobs:
                       local version_name="${fortify_version_name:-Unknown}"
                       local version_id="${fortify_project_version_id:-0}"
                       
-                      # Sanitização segura
-                      project_name=$(echo "$project_name" | jq -Rs . | sed 's/^"//;s/"$//')
-                      version_name=$(echo "$version_name" | jq -Rs . | sed 's/^"//;s/"$//')
-                      version_id=$(echo "$version_id" | jq -Rs . | sed 's/^"//;s/"$//')
+                      # Sanitização segura com remoção de quebras de linha
+                      project_name=$(echo "$project_name" | jq -Rs . | sed 's/^"//;s/"$//' | tr -d '\n')
+                      version_name=$(echo "$version_name" | jq -Rs . | sed 's/^"//;s/"$//' | tr -d '\n')
+                      version_id=$(echo "$version_id" | jq -Rs . | sed 's/^"//;s/"$//' | tr -d '\n')
                       
                       echo "$project_name|$version_name|$version_id"
                   }
@@ -321,7 +326,7 @@ jobs:
                                   defaultConfiguration: { 
                                       level: (if (.friority // .priority) == "Critical" or (.friority // .priority) == "High" then "error" elif (.friority // .priority) == "Medium" then "warning" else "note" end) 
                                   },
-                                  helpUri: ("https://fortify-ssc.evernow.com.br/html/ssc/version/" + $version_id + "/audit")
+                                  helpUri: ("https://fortify-ssc.evernow.com.br/html/ssc/version/" + ($version_id | tostring) + "/audit")
                               }) | unique_by(.id)),
                               results: ($issues[0].data | map({
                                   ruleId: ((.subCategoryName // .categoryName // .issueName // .subCategory // .category // .kingdom // "Unknown") | gsub(" "; "_") | gsub(":"; "_") | gsub("[^a-zA-Z0-9_]"; "_")),
@@ -374,6 +379,11 @@ jobs:
                           '{
                               "$schema": $schema,
                               "version": $version,
+                              "originalUriBaseIds": {
+                                  "SRCROOT": {
+                                      "uri": "file:///github/workspace/"
+                                  }
+                              },
                               "runs": [
                                   {
                                       "tool": {
@@ -792,7 +802,7 @@ jobs:
                           echo "❌ Falha crítica na geração de SARIF"
                           # Criar SARIF vazio válido
                           mkdir -p fortify-artifacts
-                          echo '{"$schema":"https://schemastore.azurewebsites.net/schemas/json/sarif-2.1.0-rtm.5.json","version":"2.1.0","runs":[{"tool":{"driver":{"name":"Fortify Static Code Analyzer","version":"25.2.0"}},"results":[]}]}' > fortify-artifacts/fortify-sast-results.sarif
+                          echo '{"$schema":"https://schemastore.azurewebsites.net/schemas/json/sarif-2.1.0-rtm.5.json","version":"2.1.0","originalUriBaseIds":{"SRCROOT":{"uri":"file:///github/workspace/"}},"runs":[{"tool":{"driver":{"name":"Fortify Static Code Analyzer","version":"25.2.0"}},"results":[]}]}' > fortify-artifacts/fortify-sast-results.sarif
                           echo "✅ SARIF vazio válido criado como último recurso"
                       fi
                   else
@@ -841,7 +851,7 @@ jobs:
                       echo "✅ SARIF válido: $count findings, $rules regras"
                       else
                           echo "❌ SARIF inválido - gerando fallback..."
-                          echo '{"$schema":"https://schemastore.azurewebsites.net/schemas/json/sarif-2.1.0-rtm.5.json","version":"2.1.0","runs":[{"tool":{"driver":{"name":"Fortify Static Code Analyzer","version":"25.2.0"}},"results":[]}]}' > fortify-artifacts/fortify-sast-results.sarif
+                          echo '{"$schema":"https://schemastore.azurewebsites.net/schemas/json/sarif-2.1.0-rtm.5.json","version":"2.1.0","originalUriBaseIds":{"SRCROOT":{"uri":"file:///github/workspace/"}},"runs":[{"tool":{"driver":{"name":"Fortify Static Code Analyzer","version":"25.2.0"}},"results":[]}]}' > fortify-artifacts/fortify-sast-results.sarif
                       fi
                   else
                       echo "❌ SARIF não encontrado"

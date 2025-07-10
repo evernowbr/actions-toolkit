@@ -28,11 +28,11 @@ on:
             FORTIFY_CONTROLLER_TOKEN:
                 required: true
 
-# ✅ PERMISSÕES MÍNIMAS PARA WORKFLOW REUTILIZÁVEL
+
 permissions:
     actions: none
     contents: read
-    security-events: none
+    security-events: write 
 
 jobs:
     scan:
@@ -128,6 +128,20 @@ jobs:
                   sanitize_json_string() {
                       local input="$1"
                       echo "$input" | jq -Rs .
+                  }
+                  
+                  # Função para sanitizar variáveis de forma consistente
+                  sanitize_vars() {
+                      local project_name="${fortify_project_name:-Unknown}"
+                      local version_name="${fortify_version_name:-Unknown}"
+                      local version_id="${fortify_project_version_id:-0}"
+                      
+                      # Sanitização segura
+                      project_name=$(echo "$project_name" | jq -Rs . | sed 's/^"//;s/"$//')
+                      version_name=$(echo "$version_name" | jq -Rs . | sed 's/^"//;s/"$//')
+                      version_id=$(echo "$version_id" | jq -Rs . | sed 's/^"//;s/"$//')
+                      
+                      echo "$project_name|$version_name|$version_id"
                   }
                   
                   # ========== FUNÇÕES PRINCIPAIS OTIMIZADAS ==========
@@ -265,15 +279,11 @@ jobs:
                       echo "📋 Gerando SARIF otimizado - VERSÃO ROBUSTA..."
                       
                       # Validações iniciais
-                      local project_name="${fortify_project_name:-Unknown}"
-                      local version_name="${fortify_version_name:-Unknown}"
-                      local version_id="${fortify_project_version_id:-0}"
+                      local sanitized_vars=$(sanitize_vars)
+                      local project_name=$(echo "$sanitized_vars" | cut -d'|' -f1)
+                      local version_name=$(echo "$sanitized_vars" | cut -d'|' -f2)
+                      local version_id=$(echo "$sanitized_vars" | cut -d'|' -f3)
                       local timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-                      
-                      # Sanitização de variáveis para segurança
-                      project_name=$(echo "$project_name" | jq -Rs . | sed 's/^"//;s/"$//')
-                      version_name=$(echo "$version_name" | jq -Rs . | sed 's/^"//;s/"$//')
-                      version_id=$(echo "$version_id" | jq -Rs . | sed 's/^"//;s/"$//')
                       
                       if [ ! -f /tmp/fortify_all_issues.json ]; then
                           echo "❌ Nenhum dado de vulnerabilidade encontrado"
@@ -435,12 +445,9 @@ jobs:
                       mkdir -p fortify-artifacts
                       
                       local timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-                      local project_name="${fortify_project_name:-Unknown}"
-                      local version_name="${fortify_version_name:-Unknown}"
-                      
-                      # Sanitização de variáveis para segurança
-                      project_name=$(echo "$project_name" | jq -Rs . | sed 's/^"//;s/"$//')
-                      version_name=$(echo "$version_name" | jq -Rs . | sed 's/^"//;s/"$//')
+                      local sanitized_vars=$(sanitize_vars)
+                      local project_name=$(echo "$sanitized_vars" | cut -d'|' -f1)
+                      local version_name=$(echo "$sanitized_vars" | cut -d'|' -f2)
                       
                       # SARIF mínimo válido com processamento seguro
                       local fallback_sarif
@@ -534,7 +541,7 @@ jobs:
                           return 1
                       fi
                       
-                      # Verifica status do scan com retry otimizado
+                      # Verifica status do scan com backoff exponencial
                       local max_retries=5
                       local retry_count=0
                       local scan_status=""
@@ -550,8 +557,9 @@ jobs:
                               if [ "$scan_status" = "REQUIRES_AUTH" ] || [ "$scan_status" = "PROCESSING" ]; then
                                   retry_count=$((retry_count + 1))
                                   if [ $retry_count -lt $max_retries ]; then
-                                      echo "⏳ Aguardando... ($retry_count/$max_retries)"
-                                      sleep $((retry_count * 15))
+                                      local sleep_time=$((5 * (2 ** (retry_count - 1))))  # Backoff exponencial: 5s, 10s, 20s, 40s
+                                      echo "⏳ Aguardando... ($retry_count/$max_retries) - ${sleep_time}s"
+                                      sleep $sleep_time
                                       continue
                                   else
                                       echo "⚠️ Timeout: scan ainda processando"
@@ -738,7 +746,6 @@ jobs:
                   
                   echo "🎉 Fortify SAST concluído com sucesso!"
 
-            # ========== UPLOAD DE ARTEFATOS ==========
             - name: Verificar qualidade do SARIF
               if: always()
               run: |

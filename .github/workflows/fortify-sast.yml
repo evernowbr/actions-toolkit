@@ -656,7 +656,6 @@ jobs:
                   echo "🚀 Iniciando Fortify SAST Scan..."
                   
                   # Verifica projeto existente
-                  local project_response
                   project_response=$(api_call "GET" "$fortify_ssc_api_url/projectVersions?q=$fortify_project_name&fulltextsearch=true" "" "verificar projeto")
                   
                   if [ $? -eq 0 ]; then
@@ -683,11 +682,10 @@ jobs:
                   
                   # Executa scan
                   echo "🔧 Executando ScanCentral..."
-                  local scan_output
                   scan_output=$($fortify_scancentral_tool -ssctoken "$fortify_controller_token" -url "$fortify_controller_url" start -skipBuild -block --log-file fortify.log --overwrite -application "$fortify_project_name" -version "$fortify_version_name" --upload-to-ssc --ssc-upload-token "$fortify_controller_token" 2>&1)
                   
                   if [ $? -eq 0 ]; then
-                      local job_token=$(echo "$scan_output" | grep "Submitted job and received token" | grep -E -o "[a-f0-9-]{36}" || echo "")
+                      job_token=$(echo "$scan_output" | grep "Submitted job and received token" | grep -E -o "[a-f0-9-]{36}" || echo "")
                       if [ -n "$job_token" ]; then
                           echo "✅ Scan iniciado: $job_token"
                       else
@@ -721,12 +719,11 @@ jobs:
                   # Gate de qualidade
                   echo "🔒 Aplicando gate de qualidade..."
                   
-                  local gate_query="audited:false [fortify priority order]:critical [fortify priority order]:high"
-                  local gate_response
+                  gate_query="audited:false [fortify priority order]:critical [fortify priority order]:high"
                   gate_response=$(api_call "GET" "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/issues?qm=issues&q=$(echo "$gate_query" | jq -sRr '@uri')" "" "consultar gate")
                   
                   if [ $? -eq 0 ]; then
-                      local gate_count=$(echo "$gate_response" | jq -r '.count // 0')
+                      gate_count=$(echo "$gate_response" | jq -r '.count // 0')
                       
                       if [ "$gate_count" -gt 0 ]; then
                           echo "❌ Gate falhou: $gate_count vulnerabilidades críticas/altas"
@@ -747,10 +744,10 @@ jobs:
               run: |
                   echo "🔍 Verificando SARIF..."
                   if [ -f fortify-artifacts/fortify-sast-results.sarif ]; then
-                      if jq empty fortify-artifacts/fortify-sast-results.sarif 2>/dev/null; then
-                          local count=$(jq '.runs[0].results | length' fortify-artifacts/fortify-sast-results.sarif 2>/dev/null || echo "0")
-                          local rules=$(jq '.runs[0].tool.driver.rules | length' fortify-artifacts/fortify-sast-results.sarif 2>/dev/null || echo "0")
-                          echo "✅ SARIF válido: $count findings, $rules regras"
+                                        if jq empty fortify-artifacts/fortify-sast-results.sarif 2>/dev/null; then
+                      count=$(jq '.runs[0].results | length' fortify-artifacts/fortify-sast-results.sarif 2>/dev/null || echo "0")
+                      rules=$(jq '.runs[0].tool.driver.rules | length' fortify-artifacts/fortify-sast-results.sarif 2>/dev/null || echo "0")
+                      echo "✅ SARIF válido: $count findings, $rules regras"
                       else
                           echo "❌ SARIF inválido - gerando fallback..."
                           echo '{"$schema":"https://schemastore.azurewebsites.net/schemas/json/sarif-2.1.0-rtm.5.json","version":"2.1.0","runs":[{"tool":{"driver":{"name":"Fortify Static Code Analyzer","version":"25.2.0"}},"results":[]}]}' > fortify-artifacts/fortify-sast-results.sarif

@@ -78,7 +78,6 @@ jobs:
                       
                       return 0
                   }
-                  }
                   
                   # Função segura para chamadas API
                   api_call() {

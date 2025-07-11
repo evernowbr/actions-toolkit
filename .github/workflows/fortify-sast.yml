@@ -659,10 +659,10 @@ jobs:
                           mapfile -t lines < <(echo "$category" | fold -s -w 28 | head -n 3)
                           for i in "${!lines[@]}"; do
                             if [[ $i -eq 0 ]]; then
-                              printf "| %-28s | %-10s | %-8s | %-27s | %-15s | %-29s |\n" \
-                                "${lines[$i]}" "${issue:0:10}" "${severity:0:8}" "${location:0:27}" "${tagged:0:15}" "${recommendation:0:29}"
+                              printf "| %-28s | %-10s | %-8s | %-40s | %-20s | %-29s |\n" \
+                                "${lines[$i]}" "${issue:0:10}" "${severity:0:8}" "${location:0:40}" "${tagged:0:20}" "${recommendation:0:29}"
                             else
-                              printf "| %-28s | %-10s | %-8s | %-27s | %-15s | %-29s |\n" "${lines[$i]}" "" "" "" "" ""
+                              printf "| %-28s | %-10s | %-8s | %-40s | %-20s | %-29s |\n" "${lines[$i]}" "" "" "" "" ""
                             fi
                           done
                           echo "+------------------------------+------------+----------+-----------------------------+----------------+-------------------------------+"

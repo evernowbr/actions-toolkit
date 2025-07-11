@@ -563,7 +563,8 @@ jobs:
                       
                       # Busca vulnerabilidades
                       local issues_response
-                      issues_response=$(api_call "GET" "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/issues?limit=1000" "" "buscar vulnerabilidades")
+                     
+                      issues_response=$(api_call "GET" "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/issues?start=0&limit=1000&showshortfilenames=true&showhidden=false&showremoved=false&showsuppressed=false" "" "buscar vulnerabilidades")
                       
                       if [ $? -eq 0 ]; then
                           local data_count=$(echo "$issues_response" | jq '.data | length' 2>/dev/null || echo "0")

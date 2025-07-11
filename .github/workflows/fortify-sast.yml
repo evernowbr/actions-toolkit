@@ -635,9 +635,9 @@ jobs:
                       local total_count=$(cat /tmp/fortify_total_count 2>/dev/null || echo 0)
                       
                       echo "| Total: $total_count (CRITICAL: $critical_count, HIGH: $high_count, MEDIUM: $medium_count, LOW: $low_count)"
-                      echo "+------------------------------+------------+----------+-----------------------------+----------------+-------------------------------+"
-                      echo "| CATEGORY                     | ISSUE ID   | SEVERITY | PRIMARY LOCATION            | TAGGED         | RECOMMENDATIONS               |"
-                      echo "+------------------------------+------------+----------+-----------------------------+----------------+-------------------------------+"
+                      echo "+------------------------------+------------+----------+------------------------------------------+----------------+"
+                      echo "| CATEGORY                     | ISSUE ID   | SEVERITY | PRIMARY LOCATION                         | TAGGED         |"
+                      echo "+------------------------------+------------+----------+------------------------------------------+----------------+"
                       
                       # TABELA DETALHADA DE FINDINGS
                       cat /tmp/fortify_all_issues.json 2>/dev/null | jq -r '

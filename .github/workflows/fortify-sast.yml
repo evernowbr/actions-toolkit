@@ -655,7 +655,8 @@ jobs:
                           ((.fileName // .primaryLocation // .folderName // "Unknown File") + ":" + ((.lineNumber // "N/A")|tostring)),
                           (.primaryTag // "N/A")
                         ] | @tsv' | while IFS=$'\t' read -r category issue severity location tagged recommendation; do
-                          mapfile -t lines < <(echo "$category" | fold -s -w 28 | head -n 3 | sed '/^\s*$/d')
+                          # mapfile -t lines < <(echo "$category" | fold -s -w 28 | head -n 3 | sed '/^\s*$/d')
+                          IFS=$'\n' read -rd '' -a lines < <(echo "$category" | fold -s -w 28 | sed '/^[[:space:]]*$/d' | head -n 3 && printf '\0')
                           for i in "${!lines[@]}"; do
                             if [[ $i -eq 0 ]]; then
                               printf "| %-28s | %-10s | %-8s | %-40s | %-14s |\n" \

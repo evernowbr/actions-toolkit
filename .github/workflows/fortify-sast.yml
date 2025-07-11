@@ -653,19 +653,18 @@ jobs:
                           (.issueInstanceId // (.id | tostring)),
                           (.friority // .priority // "Unknown"),
                           ((.fileName // .primaryLocation // .folderName // "Unknown File") + ":" + ((.lineNumber // "N/A")|tostring)),
-                          (.primaryTag // "N/A"),
-                          (.description // "Ver detalhes no SSC")
+                          (.primaryTag // "N/A")
                         ] | @tsv' | while IFS=$'\t' read -r category issue severity location tagged recommendation; do
                           mapfile -t lines < <(echo "$category" | fold -s -w 28 | head -n 3)
                           for i in "${!lines[@]}"; do
                             if [[ $i -eq 0 ]]; then
                               printf "| %-28s | %-10s | %-8s | %-40s | %-20s | %-29s |\n" \
-                                "${lines[$i]}" "${issue:0:10}" "${severity:0:8}" "${location:0:40}" "${tagged:0:20}" "${recommendation:0:29}"
+                                "${lines[$i]}" "${issue:0:10}" "${severity:0:8}" "${location:0:40}" "${tagged:0:20}"
                             else
-                              printf "| %-28s | %-10s | %-8s | %-40s | %-20s | %-29s |\n" "${lines[$i]}" "" "" "" "" ""
+                              printf "| %-28s | %-10s | %-8s | %-40s | %-20s |\n" "${lines[$i]}" "" "" "" "" ""
                             fi
                           done
-                          echo "+------------------------------+------------+----------+-----------------------------+----------------+-------------------------------+"
+                          echo "+------------------------------+------------+----------+-----------------------------+----------------+"
                       done
                       
                       # BREAKDOWN DETALHADO POR CATEGORIA E SEVERIDADE

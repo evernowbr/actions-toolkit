@@ -636,7 +636,7 @@ jobs:
                       
                       echo "| Total: $total_count (CRITICAL: $critical_count, HIGH: $high_count, MEDIUM: $medium_count, LOW: $low_count)"
                       echo "+------------------------------+------------+----------+------------------------------------------+----------------+"
-                      echo "| CATEGORY                     | ISSUE ID   | SEVERITY | PRIMARY LOCATION                         | TAGGED         |"
+                      echo "| CATEGORY                     | ISSUE ID   | SEVERITY | PRIMARY LOCATION:LINE NUMBER             | TAGGED         |"
                       echo "+------------------------------+------------+----------+------------------------------------------+----------------+"
                       
                       # TABELA DETALHADA DE FINDINGS

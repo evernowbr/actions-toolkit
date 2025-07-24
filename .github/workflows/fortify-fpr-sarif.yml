@@ -3,43 +3,36 @@ name: Fortify FPR → SARIF Converter (Linux)
 on:
   workflow_call:
     inputs:
-      # Flag para ativar a conversão
       enable_sarif_multitool:
         description: 'Habilita conversão FPR→SARIF usando SARIF MultiTool'
         required: false
         default: 'true'
         type: string
-      # Versão do .NET SDK
       dotnet_version:
         description: 'Versão do .NET SDK para instalar'
         required: false
         default: '8.0.x'
         type: string
-      # Versão do SARIF MultiTool
       sarif_multitool_version:
         description: 'Versão do SARIF MultiTool'
         required: false
         default: '4.5.4'
         type: string
-      # Nome do artefato FPR
       fpr_artifact_name:
         description: 'Nome do artefato contendo arquivos .fpr'
         required: false
         default: 'fortify-results'
         type: string
-      # Validar SARIF gerado
       validate_sarif:
         description: 'Validar arquivos SARIF gerados'
         required: false
         default: 'true'
         type: string
-      # Nome do projeto Fortify
       fortify_project_name:
         description: 'Nome do projeto Fortify'
         required: false
         default: 'Unknown'
         type: string
-      # Versão do projeto Fortify
       fortify_version_name:
         description: 'Versão do projeto Fortify'
         required: false
@@ -55,62 +48,46 @@ jobs:
   convert-fpr-linux:
     name: Convert FPR to SARIF (Linux)
     runs-on: ubuntu-latest
-    timeout-minutes: 45  # ✅ AUMENTADO - De 30 para 45 minutos
+    timeout-minutes: 45
     if: ${{ fromJSON(inputs.enable_sarif_multitool) }}
     permissions:
-      actions: read      # ✅ CORRIGIDO - Necessário para baixar artefatos
+      actions: read
       contents: read
 
     steps:
-      # ========== CHECKOUT ==========
       - name: Checkout repository
-        uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v4.1.7 - ✅ PINADO
+        uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744
 
-      # ========== DOWNLOAD FPR ARTIFACTS ==========
       - name: Download FPR artifacts
-        uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e # v4.1.7 - ✅ PINADO
+        uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e
         with:
           name: ${{ inputs.fpr_artifact_name }}
           path: ./fpr-files
 
-      # ========== VALIDATE PREREQUISITES ==========
       - name: Validate prerequisites
         run: |
-          echo "🔍 Validando pré-requisitos..."
+          set -euo pipefail
           
-          # Sanitização mais robusta de inputs
           if [[ ! "${{ inputs.fortify_project_name }}" =~ ^[a-zA-Z0-9_.-]{1,50}$ ]]; then
-            echo "❌ Nome do projeto inválido (deve ter 1-50 chars: a-zA-Z0-9_.-)"
+            echo "❌ Nome do projeto inválido"
             exit 1
           fi
           
           if [[ ! "${{ inputs.fortify_version_name }}" =~ ^[a-zA-Z0-9_.-]{1,30}$ ]]; then
-            echo "❌ Nome da versão inválido (deve ter 1-30 chars: a-zA-Z0-9_.-)"
+            echo "❌ Nome da versão inválido"
             exit 1
           fi
           
-          # Validar versão do SARIF MultiTool
           if [[ ! "${{ inputs.sarif_multitool_version }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "❌ Versão SARIF MultiTool inválida (formato: x.y.z)"
+            echo "❌ Versão SARIF MultiTool inválida"
             exit 1
           fi
           
-          # Mascarar tokens com validação
-          if [[ -n "${{ secrets.FORTIFY_UNIFIED_LOGIN_TOKEN }}" ]]; then
-            echo "::add-mask::${{ secrets.FORTIFY_UNIFIED_LOGIN_TOKEN }}"
-          fi
-          
-          if [[ -n "${{ secrets.FORTIFY_SSC_API_URL }}" ]]; then
-            echo "::add-mask::${{ secrets.FORTIFY_SSC_API_URL }}"
-          fi
-          
-          # Verificar se FPR artifact existe
           if [ ! -d "./fpr-files" ]; then
             echo "❌ Diretório fpr-files não encontrado"
             exit 1
           fi
           
-          # Verificar se há arquivos FPR
           fpr_files=$(find ./fpr-files -name "*.fpr" 2>/dev/null | wc -l)
           if [ "$fpr_files" -eq 0 ]; then
             echo "❌ Nenhum arquivo .fpr encontrado"
@@ -118,21 +95,14 @@ jobs:
           fi
           
           echo "✅ Encontrados $fpr_files arquivos FPR"
-          
-          # Verificar tamanho dos arquivos
-          find ./fpr-files -name "*.fpr" -size +100M | while read large_file; do
-            echo "⚠️ Arquivo grande detectado: $large_file"
-          done
 
-      # ========== SETUP .NET SDK ==========
       - name: Setup .NET SDK
-        uses: actions/setup-dotnet@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v4.1.7 - ✅ PINADO
+        uses: actions/setup-dotnet@6bd8b7f7774af54e05809fcc5431931b3eb1ddee
         with:
           dotnet-version: ${{ inputs.dotnet_version }}
 
-      # ========== CACHE .NET TOOLS ==========
       - name: Cache .NET tools
-        uses: actions/cache@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v4.1.7 - ✅ PINADO
+        uses: actions/cache@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9
         with:
           path: ~/.dotnet/tools
           key: dotnet-tools-${{ inputs.sarif_multitool_version }}-${{ github.repository }}-${{ hashFiles('**/*.yml', '**/*.yaml') }}
@@ -140,20 +110,13 @@ jobs:
             dotnet-tools-${{ inputs.sarif_multitool_version }}-${{ github.repository }}-
             dotnet-tools-${{ inputs.sarif_multitool_version }}-
 
-      # ========== INSTALL LINUX DEPENDENCIES ==========
       - name: Install Linux dependencies
         run: |
-          echo "📦 Instalando dependências Linux..."
           sudo apt-get update
           sudo apt-get install -y jq curl
-          echo "✅ Dependências Linux instaladas"
 
-      # ========== INSTALL SARIF MULTITOOL ==========
       - name: Install SARIF MultiTool
         run: |
-          echo "🔧 Instalando SARIF MultiTool v${{ inputs.sarif_multitool_version }}..."
-          
-          # Retry logic para instalação
           for attempt in {1..3}; do
             if dotnet tool install --global Sarif.Multitool --version ${{ inputs.sarif_multitool_version }}; then
               break
@@ -163,18 +126,13 @@ jobs:
             fi
           done
           
-          # Adicionar ao PATH explicitamente
           echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
           
-          # Verificar instalação com timeout
           timeout 30s sarif --version || {
             echo "❌ Falha na verificação do SARIF MultiTool"
             exit 1
           }
-          
-          echo "✅ SARIF MultiTool instalado com sucesso"
 
-      # ========== CONVERT FPR TO SARIF ==========
       - name: Convert FPR files to SARIF
         shell: bash
         env:
@@ -183,94 +141,64 @@ jobs:
           FORTIFY_PROJECT_NAME: ${{ inputs.fortify_project_name }}
           FORTIFY_VERSION_NAME: ${{ inputs.fortify_version_name }}
         run: |
-          # Configurações robustas
           set -euo pipefail
           IFS=$'\n\t'
-          
-          # Trap para cleanup
           trap 'echo "❌ Script falhou na linha $LINENO"' ERR
           
-          echo "🔄 Iniciando conversão FPR → SARIF (Linux)..."
-          
-          # Criar diretório de saída
           mkdir -p ./sarif-output
           
-          # Contador de arquivos
           fpr_count=0
           converted_count=0
           failed_count=0
           
-          # Buscar todos os arquivos .fpr
           shopt -s globstar
           for fpr_file in ./fpr-files/**/*.fpr; do
             if [ -f "$fpr_file" ]; then
               fpr_count=$((fpr_count + 1))
               echo "📁 Processando: $fpr_file"
               
-              # Gerar nome do arquivo SARIF
               sarif_file="./sarif-output/$(basename "$fpr_file" .fpr).sarif"
               
-              # Converter usando SARIF MultiTool
               if sarif convert "$fpr_file" --tool FortifyFpr --output "$sarif_file" --pretty-print --force; then
-                
                 converted_count=$((converted_count + 1))
                 echo "✅ Convertido: $sarif_file"
                 
-                # Pós-processamento para melhorar compatibilidade
                 if [ -f "$sarif_file" ]; then
-                  echo "🔧 Aplicando melhorias de compatibilidade..."
-                  
-                  # Função melhorada para aplicar metadados SARIF
                   apply_fortify_metadata() {
                       local sarif_file="$1"
                       local temp_file="${sarif_file}.tmp"
                       
-                      # Validações de entrada
-                      if [[ ! -f "$sarif_file" ]]; then
-                          echo "⚠️ Arquivo SARIF não encontrado: $sarif_file"
+                      if [[ ! -f "$sarif_file" ]] || [[ ! -s "$sarif_file" ]]; then
                           return 1
                       fi
                       
-                      if [[ ! -s "$sarif_file" ]]; then
-                          echo "⚠️ Arquivo SARIF vazio: $sarif_file"
-                          return 1
-                      fi
-                      
-                      # Validar JSON básico
                       if ! jq empty "$sarif_file" 2>/dev/null; then
-                          echo "⚠️ Arquivo SARIF com JSON inválido: $sarif_file"
                           return 1
                       fi
                       
-                      # Validar estrutura mínima SARIF
                       local schema_version=$(jq -r '."$schema" // empty' "$sarif_file" 2>/dev/null)
                       local sarif_version=$(jq -r '.version // empty' "$sarif_file" 2>/dev/null)
                       
                       if [[ -z "$schema_version" || -z "$sarif_version" ]]; then
-                          echo "⚠️ Estrutura SARIF inválida em: $sarif_file"
                           return 1
                       fi
                       
                       local timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
                       local fortify_version="25.2.0"
                       
-                      # Aplicar transformações com validação robusta
                       if jq --arg timestamp "$timestamp" \
                             --arg project_name "$FORTIFY_PROJECT_NAME" \
                             --arg version_name "$FORTIFY_VERSION_NAME" \
                             --arg fortify_version "$fortify_version" \
                             --arg version_id "0" '
-                         # Garantir estrutura mínima
                          if (.runs | type) != "array" or (.runs | length) == 0 then 
                              .runs = [{"tool": {"driver": {}}, "invocations": [{}], "results": []}] 
                          else . end |
                          
-                         # Garantir estruturas obrigatórias
                          (.runs[0].tool.driver.name = "Fortify Static Code Analyzer") |
                          (.runs[0].tool.driver.version = $fortify_version) |
                          (.runs[0].tool.driver.informationUri = "https://www.microfocus.com/en-us/cyberres/application-security/static-code-analyzer") |
                          
-                         # Garantir invocations
                          if (.runs[0].invocations | type) != "array" or (.runs[0].invocations | length) == 0 then
                              .runs[0].invocations = [{}]
                          else . end |
@@ -281,7 +209,6 @@ jobs:
                          (.runs[0].invocations[0].commandLine = "scancentral") |
                          (.runs[0].invocations[0].workingDirectory = {"uri": "file:///github/workspace/"}) |
                          
-                         # Processar results com validação completa
                          if (.runs[0].results | type) == "array" then
                              .runs[0].results |= map(
                                  if (.locations | type) == "array" and (.locations | length) > 0 and
@@ -306,31 +233,22 @@ jobs:
                              )
                          else . end' "$sarif_file" > "$temp_file"; then
                           
-                          # Validar arquivo gerado
                           if jq empty "$temp_file" 2>/dev/null && [[ -s "$temp_file" ]]; then
                               mv "$temp_file" "$sarif_file"
-                              echo "✅ Metadados Fortify aplicados com sucesso"
                               return 0
                           else
                               rm -f "$temp_file"
-                              echo "⚠️ Arquivo SARIF gerado inválido"
                               return 1
                           fi
                       else
                           rm -f "$temp_file"
-                          echo "⚠️ Falha na transformação JQ"
                           return 1
                       fi
                   }
                   
-                  if apply_fortify_metadata "$sarif_file"; then
-                    echo "✅ Metadados Fortify adicionados"
-                  else
-                    echo "⚠️ Falha ao adicionar metadados Fortify"
-                  fi
+                  apply_fortify_metadata "$sarif_file" && echo "✅ Metadados Fortify adicionados"
                 fi
                 
-                # Verificar tamanho do arquivo
                 if [ -f "$sarif_file" ]; then
                   file_size=$(wc -c < "$sarif_file")
                   echo "📊 Tamanho: $((file_size/1024))KB"
@@ -342,54 +260,37 @@ jobs:
             fi
           done
           
-          # Verificar se há arquivos FPR para processar
           if [ "$fpr_count" -eq 0 ]; then
             echo "❌ Nenhum arquivo FPR encontrado"
             exit 1
           fi
           
-          echo "📈 Resumo da conversão (Linux):"
+          echo "📈 Resumo da conversão:"
           echo "   • Arquivos FPR encontrados: $fpr_count"
           echo "   • Arquivos convertidos: $converted_count"
           echo "   • Falhas na conversão: $failed_count"
           
-          # Calcular taxa de sucesso
           if [ "$fpr_count" -gt 0 ]; then
             success_rate=$((converted_count * 100 / fpr_count))
             echo "   • Taxa de sucesso: ${success_rate}%"
-          else
-            echo "   • Taxa de sucesso: N/A (nenhum arquivo FPR encontrado)"
           fi
           
-          # Falhar se não houve conversões bem-sucedidas
           if [ "$converted_count" -eq 0 ] && [ "$fpr_count" -gt 0 ]; then
             echo "❌ Nenhum arquivo foi convertido com sucesso"
             exit 1
           fi
           
-          # Gerar resumo para GitHub
           echo "### 📊 Conversão FPR → SARIF (Linux)" >> $GITHUB_STEP_SUMMARY
           echo "| Métrica | Valor | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|---------|-------|--------|" >> $GITHUB_STEP_SUMMARY
           echo "| FPR Processados | $fpr_count | ✅ |" >> $GITHUB_STEP_SUMMARY
           echo "| SARIF Gerados | $converted_count | $([ $converted_count -gt 0 ] && echo "✅" || echo "❌") |" >> $GITHUB_STEP_SUMMARY
           echo "| Taxa Sucesso | ${success_rate}% | $([ $success_rate -gt 90 ] && echo "✅" || echo "⚠️") |" >> $GITHUB_STEP_SUMMARY
-          echo "| Tempo Execução | $(date -u -d @$SECONDS +%M:%S) | ✅ |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 🔍 Status da Integração" >> $GITHUB_STEP_SUMMARY
-          echo "| Componente | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|------------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Artefato FPR | ✅ Baixado do workflow anterior |" >> $GITHUB_STEP_SUMMARY
-          echo "| SARIF MultiTool | ✅ Instalado v${{ inputs.sarif_multitool_version }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Conversão | ✅ $converted_count/$fpr_count arquivos |" >> $GITHUB_STEP_SUMMARY
 
-      # ========== VALIDATE SARIF FILES ==========
       - name: Validate SARIF files
         if: ${{ fromJSON(inputs.validate_sarif) }}
         shell: bash
         run: |
-          echo "🔍 Validando arquivos SARIF..."
-          
           validation_errors=0
           valid_files=0
           total_files=0
@@ -414,28 +315,19 @@ jobs:
           echo "   • Arquivos válidos: $valid_files"
           echo "   • Erros de validação: $validation_errors"
           
-          if [ $validation_errors -gt 0 ]; then
-            echo "⚠️ Alguns arquivos SARIF falharam na validação"
-          fi
-          
-          # Falhar se todos os arquivos são inválidos
           if [ "$valid_files" -eq 0 ] && [ "$total_files" -gt 0 ]; then
             echo "❌ Todos os arquivos SARIF são inválidos"
             exit 1
           fi
 
-      # ========== ANALYZE SARIF CONTENT ==========
       - name: Analyze SARIF content
         shell: bash
         run: |
-          echo "📊 Análise detalhada dos arquivos SARIF..."
-          
           for sarif_file in ./sarif-output/*.sarif; do
             if [ -f "$sarif_file" ]; then
               echo ""
               echo "📋 $(basename "$sarif_file"):"
               
-              # Contar resultados por nível
               critical_high=$(jq '.runs[0].results[] | select(.level == "error") | .ruleId' "$sarif_file" 2>/dev/null | wc -l)
               medium=$(jq '.runs[0].results[] | select(.level == "warning") | .ruleId' "$sarif_file" 2>/dev/null | wc -l)
               low=$(jq '.runs[0].results[] | select(.level == "note") | .ruleId' "$sarif_file" 2>/dev/null | wc -l)
@@ -446,15 +338,13 @@ jobs:
               echo "   • Medium: $medium"
               echo "   • Low: $low"
               
-              # Verificar regras únicas
               unique_rules=$(jq '.runs[0].results[].ruleId' "$sarif_file" 2>/dev/null | sort | uniq | wc -l)
               echo "   • Regras únicas: $unique_rules"
             fi
           done
 
-      # ========== UPLOAD SARIF ARTIFACTS ==========
       - name: Upload SARIF artifacts
-        uses: actions/upload-artifact@f43a0e5ff2bd294095638e18286ca9a3d1956744 # v4.1.7 - ✅ PINADO
+        uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874
         with:
           name: fortify-sarif-linux
           path: './sarif-output/*.sarif'

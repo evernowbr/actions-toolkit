@@ -1,4 +1,4 @@
-name: Fortify FPR → SARIF Converter
+name: Fortify Complete Scan + SARIF Converter
 
 on:
   workflow_call:
@@ -18,10 +18,6 @@ on:
         required: false
         default: '4.5.4'
         type: string
-      fpr_artifact_name:
-        description: 'Nome do artefato FPR'
-        required: true
-        type: string
       validate_sarif:
         description: 'Validar SARIF gerado'
         required: false
@@ -35,37 +31,68 @@ on:
         description: 'Versão do projeto'
         required: true
         type: string
+      fortify_scancentral_tool:
+        description: 'Ferramenta ScanCentral'
+        required: false
+        default: 'scancentral'
+        type: string
+      fortify_translate_name:
+        description: 'Parâmetros de tradução'
+        required: false
+        default: '-bt none'
+        type: string
+      fortify_translate_additional_flags:
+        description: 'Flags adicionais de tradução'
+        required: false
+        default: ''
+        type: string
     secrets:
       FORTIFY_SSC_API_URL:
-        required: false
+        required: true
       FORTIFY_UNIFIED_LOGIN_TOKEN:
-        required: false
+        required: true
+      FORTIFY_CONTROLLER_URL:
+        required: true
+      FORTIFY_CONTROLLER_TOKEN:
+        required: true
 
 jobs:
-  convert-fpr:
-    name: Convert FPR to SARIF
+  fortify-complete:
+    name: Fortify Scan + SARIF Conversion
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     if: ${{ fromJSON(inputs.enable_sarif_multitool) }}
     permissions:
       actions: read
       contents: read
 
+    # ✅ CORREÇÃO 1 - Adicionar variáveis de ambiente
+    env:
+      FORTIFY_SSC_API_URL: ${{ secrets.FORTIFY_SSC_API_URL }}
+      FORTIFY_UNIFIED_LOGIN_TOKEN: ${{ secrets.FORTIFY_UNIFIED_LOGIN_TOKEN }}
+      FORTIFY_CONTROLLER_URL: ${{ secrets.FORTIFY_CONTROLLER_URL }}
+      FORTIFY_CONTROLLER_TOKEN: ${{ secrets.FORTIFY_CONTROLLER_TOKEN }}
+      FORTIFY_PROJECT_NAME: ${{ inputs.fortify_project_name }}
+      FORTIFY_VERSION_NAME: ${{ inputs.fortify_version_name }}
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744
 
-      - name: Download FPR artifacts
-        uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e
-        with:
-          name: ${{ inputs.fpr_artifact_name }}
-          path: ./fpr-files
-
-      - name: Validate inputs and prerequisites
+      # ✅ CORREÇÃO 3 - Mascarar secrets
+      - name: Validate inputs
         run: |
           set -euo pipefail
           
+          # Mascarar tokens sensíveis
+          echo "::add-mask::${{ secrets.FORTIFY_UNIFIED_LOGIN_TOKEN }}"
+          echo "::add-mask::${{ secrets.FORTIFY_CONTROLLER_TOKEN }}"
+          
           echo "🔍 Validando inputs..."
+          echo "🔍 Projeto: ${{ inputs.fortify_project_name }}"
+          echo "🔍 Versão: ${{ inputs.fortify_version_name }}"
+          echo "🔍 Controller: ${FORTIFY_CONTROLLER_URL:+✅ Configurado} ${FORTIFY_CONTROLLER_URL:-❌ Ausente}"
+          echo "🔍 SSC: ${FORTIFY_SSC_API_URL:+✅ Configurado} ${FORTIFY_SSC_API_URL:-❌ Ausente}"
           
           if [[ -z "${{ inputs.fortify_project_name }}" ]]; then
             echo "❌ Nome do projeto é obrigatório"
@@ -82,30 +109,188 @@ jobs:
             exit 1
           fi
           
-          echo "🔍 Validando artefatos FPR..."
+          echo "✅ Validação de inputs concluída"
+
+      - name: Install dependencies
+        run: |
+          echo "📦 Instalando dependências..."
+          sudo apt-get update -qq
+          sudo apt-get install -y jq curl wget unzip openjdk-11-jdk
+
+      - name: Setup Java
+        run: |
+          echo "☕ Configurando Java..."
+          export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
+          echo "JAVA_HOME=$JAVA_HOME" >> $GITHUB_ENV
+          java -version
+
+      # ✅ CORREÇÃO 2 - Download correto do ScanCentral
+      - name: Install ScanCentral Client
+        run: |
+          echo "🔧 Instalando ScanCentral Client..."
           
-          if [ ! -d "./fpr-files" ]; then
-            echo "❌ Diretório fpr-files não encontrado"
-            echo "💡 Verifique se o job fortify-sast foi executado com sucesso"
-            exit 1
+          # Baixar do Controller (não de URL externa)
+          echo "📥 Baixando do Controller: $FORTIFY_CONTROLLER_URL"
+          curl -k -sSL "$FORTIFY_CONTROLLER_URL/download/scancentral.zip" -o scancentral.zip
+          
+          # Extração robusta
+          unzip -q scancentral.zip -d $HOME/sc-temp
+          SC_DIR=$(find $HOME/sc-temp -name "scancentral" -type f 2>/dev/null | head -1 | dirname)
+          
+          if [ -z "$SC_DIR" ]; then
+              echo "❌ Executável scancentral não encontrado após extração"
+              echo "📋 Conteúdo extraído:"
+              find $HOME/sc-temp -type f | head -20
+              exit 1
           fi
           
-          fpr_files=$(find ./fpr-files -name "*.fpr" 2>/dev/null | wc -l)
-          if [ "$fpr_files" -eq 0 ]; then
-            echo "❌ Nenhum arquivo .fpr encontrado"
-            echo "💡 Verifique o nome do artefato: ${{ inputs.fpr_artifact_name }}"
-            exit 1
-          fi
+          # Configurar PATH
+          chmod +x "$SC_DIR/scancentral"
+          echo "$SC_DIR" >> $GITHUB_PATH
           
-          echo "✅ Validação concluída - $fpr_files arquivos FPR encontrados"
+          # Verificar instalação
+          export PATH="$SC_DIR:$PATH"
+          scancentral --version
+          echo "✅ ScanCentral Client instalado: $SC_DIR"
+
+      - name: Setup Fortify project
+        run: |
+          echo "🔍 Configurando projeto no SSC..."
+          
+          # Função para chamadas API
+          api_call() {
+              local method="${1:-GET}"
+              local endpoint="$2"
+              local data="${3:-}"
+              
+              curl -k -sSL --fail \
+                  -H "Content-Type: application/json" \
+                  -H "Accept: application/json" \
+                  -H "Authorization: FortifyToken $FORTIFY_UNIFIED_LOGIN_TOKEN" \
+                  ${data:+-d "$data"} \
+                  ${method:+-X "$method"} \
+                  "$FORTIFY_SSC_API_URL/api/v1/$endpoint"
+          }
+          
+          # Buscar projeto/versão
+          echo "🔍 Buscando projeto: $FORTIFY_PROJECT_NAME"
+          project_response=$(api_call "GET" "projectVersions?q=$FORTIFY_PROJECT_NAME&fulltextsearch=true")
+          
+          version_id=$(echo "$project_response" | jq -r --arg proj "$FORTIFY_PROJECT_NAME" --arg ver "$FORTIFY_VERSION_NAME" \
+              '.data[] | select(.project.name==$proj and .name==$ver) | .id')
+          
+          if [ -n "$version_id" ] && [ "$version_id" != "null" ]; then
+              echo "✅ Projeto e versão encontrados: $version_id"
+              echo "FORTIFY_PROJECT_VERSION_ID=$version_id" >> $GITHUB_ENV
+          else
+              echo "⚠️ Projeto/versão não encontrado - será criado durante o scan"
+              echo "FORTIFY_PROJECT_VERSION_ID=" >> $GITHUB_ENV
+          fi
+
+      - name: Execute Fortify Scan
+        run: |
+          echo "🚀 Executando scan Fortify..."
+          
+          # Configurar variáveis de ambiente
+          export JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
+          
+          # Executar scan com upload para SSC
+          scancentral \
+            -url "$FORTIFY_CONTROLLER_URL" \
+            -token "$FORTIFY_CONTROLLER_TOKEN" \
+            start \
+            ${{ inputs.fortify_translate_name }} \
+            ${{ inputs.fortify_translate_additional_flags }} \
+            -upload \
+            -uptoken "$FORTIFY_UNIFIED_LOGIN_TOKEN" \
+            -application "$FORTIFY_PROJECT_NAME" \
+            -version "$FORTIFY_VERSION_NAME" \
+            -block
+          
+          echo "✅ Scan executado e enviado para SSC"
+
+      - name: Wait and download FPR from SSC
+        run: |
+          echo "📥 Aguardando processamento e baixando FPR do SSC..."
+          
+          # Função para aguardar e baixar FPR
+          wait_and_download_fpr() {
+              local max_attempts=30
+              local attempt=1
+              
+              while [ $attempt -le $max_attempts ]; do
+                  echo "🔍 Tentativa $attempt/$max_attempts: Buscando FPR processado..."
+                  
+                  # Buscar projeto/versão atualizado
+                  project_response=$(curl -k -sSL \
+                      -H "Authorization: FortifyToken $FORTIFY_UNIFIED_LOGIN_TOKEN" \
+                      "$FORTIFY_SSC_API_URL/api/v1/projectVersions?q=$FORTIFY_PROJECT_NAME&fulltextsearch=true")
+                  
+                  version_id=$(echo "$project_response" | jq -r --arg proj "$FORTIFY_PROJECT_NAME" --arg ver "$FORTIFY_VERSION_NAME" \
+                      '.data[] | select(.project.name==$proj and .name==$ver) | .id')
+                  
+                  if [ -n "$version_id" ] && [ "$version_id" != "null" ]; then
+                      echo "✅ Versão encontrada: $version_id"
+                      
+                      # Buscar artefatos FPR mais recentes
+                      artifacts_response=$(curl -k -sSL \
+                          -H "Authorization: FortifyToken $FORTIFY_UNIFIED_LOGIN_TOKEN" \
+                          "$FORTIFY_SSC_API_URL/api/v1/projectVersions/$version_id/artifacts")
+                      
+                      # Pegar o FPR mais recente
+                      fpr_id=$(echo "$artifacts_response" | jq -r '.data[] | select(.name | endswith(".fpr")) | .id' | head -1)
+                      
+                      if [ -n "$fpr_id" ] && [ "$fpr_id" != "null" ]; then
+                          echo "✅ FPR encontrado: $fpr_id"
+                          
+                          # Criar diretório e baixar FPR
+                          mkdir -p ./fpr-files
+                          fpr_filename="$FORTIFY_PROJECT_NAME-$FORTIFY_VERSION_NAME.fpr"
+                          
+                          if curl -k -sSL \
+                              -H "Authorization: FortifyToken $FORTIFY_UNIFIED_LOGIN_TOKEN" \
+                              -H "Accept: application/octet-stream" \
+                              "$FORTIFY_SSC_API_URL/api/v1/projectVersions/$version_id/artifacts/$fpr_id/content" \
+                              -o "./fpr-files/$fpr_filename"; then
+                              
+                              file_size=$(wc -c < "./fpr-files/$fpr_filename")
+                              echo "✅ FPR baixado: $fpr_filename ($((file_size/1024/1024))MB)"
+                              echo "FORTIFY_PROJECT_VERSION_ID=$version_id" >> $GITHUB_ENV
+                              return 0
+                          else
+                              echo "❌ Falha ao baixar FPR"
+                          fi
+                      else
+                          echo "⏳ FPR ainda não disponível..."
+                      fi
+                  else
+                      echo "⏳ Versão ainda não criada..."
+                  fi
+                  
+                  echo "⏳ Aguardando 60s antes da próxima tentativa..."
+                  sleep 60
+                  attempt=$((attempt + 1))
+              done
+              
+              echo "❌ Timeout: FPR não foi processado em $((max_attempts * 60))s"
+              return 1
+          }
+          
+          # Executar função de aguardar e baixar
+          if wait_and_download_fpr; then
+              echo "✅ FPR baixado com sucesso"
+          else
+              echo "❌ Falha ao baixar FPR"
+              exit 1
+          fi
 
       - name: Setup .NET SDK
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@6bd8b7f7774af54e05809fcc5431931b3eb1ddee
         with:
           dotnet-version: ${{ inputs.dotnet_version }}
 
       - name: Cache .NET tools
-        uses: actions/cache@v4
+        uses: actions/cache@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9
         with:
           path: ~/.dotnet/tools
           key: dotnet-tools-${{ inputs.sarif_multitool_version }}-${{ runner.os }}
@@ -131,28 +316,18 @@ jobs:
             fi
           done
           
-          if command -v sarif >/dev/null 2>&1; then
-            sarif --version
-            echo "✅ SARIF MultiTool pronto para uso"
-          else
-            echo "❌ SARIF MultiTool não encontrado no PATH"
-            exit 1
-          fi
+          # Adicionar ao PATH
+          echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
+          export PATH="$HOME/.dotnet/tools:$PATH"
+          sarif --version
+          echo "✅ SARIF MultiTool pronto"
 
       - name: Convert FPR to SARIF
-        shell: bash
-        env:
-          FORTIFY_PROJECT_NAME: ${{ inputs.fortify_project_name }}
-          FORTIFY_VERSION_NAME: ${{ inputs.fortify_version_name }}
         run: |
-          set -euo pipefail
-          
-          echo "🔄 Iniciando conversão FPR → SARIF..."
+          echo "🔄 Convertendo FPR → SARIF..."
           
           mkdir -p ./sarif-output
-          
           converted_count=0
-          failed_count=0
           
           for fpr_file in ./fpr-files/*.fpr; do
             if [ -f "$fpr_file" ]; then
@@ -162,107 +337,34 @@ jobs:
               
               if sarif convert "$fpr_file" --tool FortifyFpr --output "$sarif_file" --pretty-print --force; then
                 converted_count=$((converted_count + 1))
-                echo "✅ Convertido: $(basename "$fpr_file")"
+                echo "✅ Convertido: $(basename "$sarif_file")"
                 
+                # Adicionar metadados Fortify
                 if [ -f "$sarif_file" ]; then
-                  apply_fortify_metadata() {
-                      local sarif_file="$1"
-                      local temp_file="${sarif_file}.tmp"
-                      
-                      if [[ ! -f "$sarif_file" ]] || [[ ! -s "$sarif_file" ]]; then
-                          return 1
-                      fi
-                      
-                      if ! jq empty "$sarif_file" 2>/dev/null; then
-                          return 1
-                      fi
-                      
-                      local schema_version=$(jq -r '."$schema" // empty' "$sarif_file" 2>/dev/null)
-                      local sarif_version=$(jq -r '.version // empty' "$sarif_file" 2>/dev/null)
-                      
-                      if [[ -z "$schema_version" || -z "$sarif_version" ]]; then
-                          return 1
-                      fi
-                      
-                      local timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-                      local fortify_version="25.2.0"
-                      
-                      if jq --arg timestamp "$timestamp" \
-                            --arg project_name "$FORTIFY_PROJECT_NAME" \
-                            --arg version_name "$FORTIFY_VERSION_NAME" \
-                            --arg fortify_version "$fortify_version" \
-                            --arg version_id "0" '
-                         if (.runs | type) != "array" or (.runs | length) == 0 then 
-                             .runs = [{"tool": {"driver": {}}, "invocations": [{}], "results": []}] 
-                         else . end |
-                         
-                         (.runs[0].tool.driver.name = "Fortify Static Code Analyzer") |
-                         (.runs[0].tool.driver.version = $fortify_version) |
-                         (.runs[0].tool.driver.informationUri = "https://www.microfocus.com/en-us/cyberres/application-security/static-code-analyzer") |
-                         
-                         if (.runs[0].invocations | type) != "array" or (.runs[0].invocations | length) == 0 then
-                             .runs[0].invocations = [{}]
-                         else . end |
-                         
-                         (.runs[0].invocations[0].startTimeUtc = $timestamp) |
-                         (.runs[0].invocations[0].endTimeUtc = $timestamp) |
-                         (.runs[0].invocations[0].executionSuccessful = true) |
-                         (.runs[0].invocations[0].commandLine = "scancentral") |
-                         (.runs[0].invocations[0].workingDirectory = {"uri": "file:///github/workspace/"}) |
-                         
-                         if (.runs[0].results | type) == "array" then
-                             .runs[0].results |= map(
-                                 if (.locations | type) == "array" and (.locations | length) > 0 and
-                                    .locations[0].physicalLocation.artifactLocation.uri and
-                                    .locations[0].physicalLocation.region.startLine and
-                                    .ruleId then
-                                     . + {
-                                         "partialFingerprints": {
-                                             "primaryLocationLineHash": (.locations[0].physicalLocation.artifactLocation.uri + ":" + (.locations[0].physicalLocation.region.startLine | tostring) + ":" + .ruleId)
-                                         },
-                                         "properties": {
-                                             "fortify_project": $project_name,
-                                             "fortify_version": $version_name,
-                                             "fortify_version_id": $version_id,
-                                             "fortify_scan_time": $timestamp,
-                                             "fortify_engine_version": $fortify_version
-                                         }
-                                     }
-                                 else
-                                     .
-                                 end
-                             )
-                         else . end' "$sarif_file" > "$temp_file"; then
-                          
-                          if jq empty "$temp_file" 2>/dev/null && [[ -s "$temp_file" ]]; then
-                              mv "$temp_file" "$sarif_file"
-                              return 0
-                          else
-                              rm -f "$temp_file"
-                              return 1
-                          fi
-                      else
-                          rm -f "$temp_file"
-                          return 1
-                      fi
-                  }
+                  timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
                   
-                  if apply_fortify_metadata "$sarif_file"; then
-                    echo "✅ Metadados Fortify adicionados"
-                  else
-                    echo "⚠️ Falha ao adicionar metadados, continuando..."
-                  fi
+                  jq --arg project "$FORTIFY_PROJECT_NAME" \
+                     --arg version "$FORTIFY_VERSION_NAME" \
+                     --arg timestamp "$timestamp" \
+                     --arg version_id "${FORTIFY_PROJECT_VERSION_ID:-0}" \
+                     '(.runs[0].properties // {}) |= . + {
+                        "fortify_project": $project,
+                        "fortify_version": $version,
+                        "fortify_version_id": $version_id,
+                        "fortify_scan_time": $timestamp,
+                        "fortify_engine_version": "25.2.0"
+                      }' "$sarif_file" > "${sarif_file}.tmp" && mv "${sarif_file}.tmp" "$sarif_file"
+                  
+                  file_size=$(wc -c < "$sarif_file")
+                  echo "📊 Tamanho: $((file_size/1024))KB"
                 fi
               else
-                failed_count=$((failed_count + 1))
                 echo "❌ Falha na conversão: $(basename "$fpr_file")"
               fi
             fi
           done
           
-          echo "📈 Conversão concluída:"
-          echo "   • Arquivos convertidos: $converted_count"
-          echo "   • Failures: $failed_count"
+          echo "📈 Conversão concluída: $converted_count arquivos convertidos"
           
           if [ "$converted_count" -eq 0 ]; then
             echo "❌ Nenhum arquivo foi convertido"
@@ -274,25 +376,35 @@ jobs:
         run: |
           echo "🔍 Validando arquivos SARIF..."
           
-          validation_errors=0
+          valid_count=0
           
           for sarif_file in ./sarif-output/*.sarif; do
             if [ -f "$sarif_file" ]; then
               if sarif validate "$sarif_file" 2>/dev/null; then
                 echo "✅ $(basename "$sarif_file") - válido"
+                valid_count=$((valid_count + 1))
               else
                 echo "❌ $(basename "$sarif_file") - inválido"
-                validation_errors=$((validation_errors + 1))
               fi
             fi
           done
           
-          if [ $validation_errors -gt 0 ]; then
-            echo "⚠️ $validation_errors arquivos com problemas de validação"
-          fi
+          echo "📊 Validação: $valid_count arquivos válidos"
+
+      - name: Summary and upload
+        run: |
+          echo "📋 Resumo final:"
+          
+          for sarif_file in ./sarif-output/*.sarif; do
+            if [ -f "$sarif_file" ]; then
+              findings=$(jq '.runs[0].results | length' "$sarif_file" 2>/dev/null || echo "0")
+              rules=$(jq '.runs[0].tool.driver.rules | length' "$sarif_file" 2>/dev/null || echo "0")
+              echo "  • $(basename "$sarif_file"): $findings findings, $rules rules"
+            fi
+          done
 
       - name: Upload SARIF artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874
         with:
           name: fortify-sarif-${{ github.run_number }}
           path: './sarif-output/'

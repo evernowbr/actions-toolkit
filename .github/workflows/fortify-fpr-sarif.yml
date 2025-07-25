@@ -85,7 +85,7 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y jq curl
 
-      - name: Setup utility functions
+      - name: Verify project exists
         run: |
           validate_json_response() {
               local response="$1"
@@ -148,10 +148,6 @@ jobs:
               return 0
           }
           
-          export -f validate_json_response api_call
-
-      - name: Verify project exists
-        run: |
           echo "🔍 Verificando projeto no SSC..."
           
           project_response=$(api_call "GET" "$FORTIFY_SSC_API_URL/api/v1/projectVersions?q=$FORTIFY_PROJECT_NAME&fulltextsearch=true" "" "verificar projeto")
@@ -174,6 +170,67 @@ jobs:
 
       - name: Queue remote scan
         run: |
+          validate_json_response() {
+              local response="$1"
+              local context="$2"
+              
+              if [ -z "$response" ]; then
+                  echo "❌ Resposta vazia ($context)"
+                  return 1
+              fi
+              
+              if ! echo "$response" | jq -e . >/dev/null 2>&1; then
+                  echo "❌ JSON inválido ($context)"
+                  return 1
+              fi
+              
+              local error_msg=$(echo "$response" | jq -r '.message // empty')
+              if [ -n "$error_msg" ]; then
+                  echo "❌ Erro da API ($context): $error_msg"
+                  return 1
+              fi
+              
+              return 0
+          }
+          
+          api_call() {
+              local method="${1:-GET}"
+              local url="$2"
+              local data="${3:-}"
+              local context="$4"
+              
+              local curl_opts=(-sS -k -L --fail)
+              curl_opts+=(-H "Content-Type: application/json")
+              curl_opts+=(-H "Accept: application/json")
+              curl_opts+=(-H "Authorization: FortifyToken $FORTIFY_UNIFIED_LOGIN_TOKEN")
+              
+              if [ "$method" = "POST" ] || [ "$method" = "PUT" ]; then
+                  curl_opts+=(-X "$method")
+                  if [ -n "$data" ]; then
+                      curl_opts+=(-d "$data")
+                  fi
+              fi
+              
+              curl_opts+=("$url")
+              
+              local response
+              local exit_code
+              
+              response=$(curl "${curl_opts[@]}" 2>/dev/null) || exit_code=$?
+              
+              if [ "${exit_code:-0}" -ne 0 ]; then
+                  echo "❌ Falha na API ($context): $exit_code"
+                  return 1
+              fi
+              
+              if ! validate_json_response "$response" "$context"; then
+                  return 1
+              fi
+              
+              echo "$response"
+              return 0
+          }
+          
           echo "🚀 Enfileirando scan remoto..."
           
           scan_job=$(api_call "POST" "$FORTIFY_SSC_API_URL/api/v1/projectVersions/$FORTIFY_PROJECT_VERSION_ID/scanQueue" \
@@ -196,6 +253,67 @@ jobs:
 
       - name: Wait for scan completion
         run: |
+          validate_json_response() {
+              local response="$1"
+              local context="$2"
+              
+              if [ -z "$response" ]; then
+                  echo "❌ Resposta vazia ($context)"
+                  return 1
+              fi
+              
+              if ! echo "$response" | jq -e . >/dev/null 2>&1; then
+                  echo "❌ JSON inválido ($context)"
+                  return 1
+              fi
+              
+              local error_msg=$(echo "$response" | jq -r '.message // empty')
+              if [ -n "$error_msg" ]; then
+                  echo "❌ Erro da API ($context): $error_msg"
+                  return 1
+              fi
+              
+              return 0
+          }
+          
+          api_call() {
+              local method="${1:-GET}"
+              local url="$2"
+              local data="${3:-}"
+              local context="$4"
+              
+              local curl_opts=(-sS -k -L --fail)
+              curl_opts+=(-H "Content-Type: application/json")
+              curl_opts+=(-H "Accept: application/json")
+              curl_opts+=(-H "Authorization: FortifyToken $FORTIFY_UNIFIED_LOGIN_TOKEN")
+              
+              if [ "$method" = "POST" ] || [ "$method" = "PUT" ]; then
+                  curl_opts+=(-X "$method")
+                  if [ -n "$data" ]; then
+                      curl_opts+=(-d "$data")
+                  fi
+              fi
+              
+              curl_opts+=("$url")
+              
+              local response
+              local exit_code
+              
+              response=$(curl "${curl_opts[@]}" 2>/dev/null) || exit_code=$?
+              
+              if [ "${exit_code:-0}" -ne 0 ]; then
+                  echo "❌ Falha na API ($context): $exit_code"
+                  return 1
+              fi
+              
+              if ! validate_json_response "$response" "$context"; then
+                  return 1
+              fi
+              
+              echo "$response"
+              return 0
+          }
+          
           echo "⏳ Aguardando conclusão do scan..."
           
           attempt=0
@@ -243,6 +361,67 @@ jobs:
 
       - name: Download FPR
         run: |
+          validate_json_response() {
+              local response="$1"
+              local context="$2"
+              
+              if [ -z "$response" ]; then
+                  echo "❌ Resposta vazia ($context)"
+                  return 1
+              fi
+              
+              if ! echo "$response" | jq -e . >/dev/null 2>&1; then
+                  echo "❌ JSON inválido ($context)"
+                  return 1
+              fi
+              
+              local error_msg=$(echo "$response" | jq -r '.message // empty')
+              if [ -n "$error_msg" ]; then
+                  echo "❌ Erro da API ($context): $error_msg"
+                  return 1
+              fi
+              
+              return 0
+          }
+          
+          api_call() {
+              local method="${1:-GET}"
+              local url="$2"
+              local data="${3:-}"
+              local context="$4"
+              
+              local curl_opts=(-sS -k -L --fail)
+              curl_opts+=(-H "Content-Type: application/json")
+              curl_opts+=(-H "Accept: application/json")
+              curl_opts+=(-H "Authorization: FortifyToken $FORTIFY_UNIFIED_LOGIN_TOKEN")
+              
+              if [ "$method" = "POST" ] || [ "$method" = "PUT" ]; then
+                  curl_opts+=(-X "$method")
+                  if [ -n "$data" ]; then
+                      curl_opts+=(-d "$data")
+                  fi
+              fi
+              
+              curl_opts+=("$url")
+              
+              local response
+              local exit_code
+              
+              response=$(curl "${curl_opts[@]}" 2>/dev/null) || exit_code=$?
+              
+              if [ "${exit_code:-0}" -ne 0 ]; then
+                  echo "❌ Falha na API ($context): $exit_code"
+                  return 1
+              fi
+              
+              if ! validate_json_response "$response" "$context"; then
+                  return 1
+              fi
+              
+              echo "$response"
+              return 0
+          }
+          
           echo "📥 Baixando FPR..."
           
           artifacts_response=$(api_call "GET" "$FORTIFY_SSC_API_URL/api/v1/projectVersions/$FORTIFY_PROJECT_VERSION_ID/artifacts" "" "buscar artefatos")
@@ -362,6 +541,67 @@ jobs:
 
       - name: Apply quality gate
         run: |
+          validate_json_response() {
+              local response="$1"
+              local context="$2"
+              
+              if [ -z "$response" ]; then
+                  echo "❌ Resposta vazia ($context)"
+                  return 1
+              fi
+              
+              if ! echo "$response" | jq -e . >/dev/null 2>&1; then
+                  echo "❌ JSON inválido ($context)"
+                  return 1
+              fi
+              
+              local error_msg=$(echo "$response" | jq -r '.message // empty')
+              if [ -n "$error_msg" ]; then
+                  echo "❌ Erro da API ($context): $error_msg"
+                  return 1
+              fi
+              
+              return 0
+          }
+          
+          api_call() {
+              local method="${1:-GET}"
+              local url="$2"
+              local data="${3:-}"
+              local context="$4"
+              
+              local curl_opts=(-sS -k -L --fail)
+              curl_opts+=(-H "Content-Type: application/json")
+              curl_opts+=(-H "Accept: application/json")
+              curl_opts+=(-H "Authorization: FortifyToken $FORTIFY_UNIFIED_LOGIN_TOKEN")
+              
+              if [ "$method" = "POST" ] || [ "$method" = "PUT" ]; then
+                  curl_opts+=(-X "$method")
+                  if [ -n "$data" ]; then
+                      curl_opts+=(-d "$data")
+                  fi
+              fi
+              
+              curl_opts+=("$url")
+              
+              local response
+              local exit_code
+              
+              response=$(curl "${curl_opts[@]}" 2>/dev/null) || exit_code=$?
+              
+              if [ "${exit_code:-0}" -ne 0 ]; then
+                  echo "❌ Falha na API ($context): $exit_code"
+                  return 1
+              fi
+              
+              if ! validate_json_response "$response" "$context"; then
+                  return 1
+              fi
+              
+              echo "$response"
+              return 0
+          }
+          
           echo "🔒 Aplicando gate de qualidade..."
           
           gate_query="audited:false [fortify priority order]:critical [fortify priority order]:high"

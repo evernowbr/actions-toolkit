@@ -14,11 +14,11 @@ on:
                 required: false
                 default: '8.0.x'
                 type: string
-            sarif_multitool_version:
-                description: 'Versão do SARIF MultiTool'
-                required: false
-                default: '4.5.4'
-                type: string
+                  sarif_multitool_version:
+        description: 'Versão do SARIF MultiTool'
+        required: false
+        default: '4.5.5'
+        type: string
             validate_sarif:
                 description: 'Validar SARIF gerado'
                 required: false
@@ -393,3 +393,4 @@ jobs:
                 path: fortify-artifacts/fortify-sast-results.sarif
                 if-no-files-found: error
                 retention-days: 30 
+                

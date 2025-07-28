@@ -56,8 +56,8 @@ jobs:
                   wget https://dotnet.microsoft.com/download/dotnet/scripts/v1/dotnet-install.sh
                   chmod +x dotnet-install.sh
                   ./dotnet-install.sh --runtime dotnet --version 3.1.32
-                  export DOTNET_ROOT="$HOME/.dotnet"
-                  export PATH="$HOME/.dotnet:$PATH"
+                  echo "DOTNET_ROOT=$HOME/.dotnet" >> $GITHUB_ENV
+                  echo "PATH=$HOME/.dotnet:$PATH" >> $GITHUB_ENV
                   echo "✅ .NET Core 3.1.32 instalado"
                   dotnet --list-runtimes
 
@@ -77,7 +77,14 @@ jobs:
                   dotnet --list-runtimes
                   echo "📋 Versão SARIF MultiTool solicitada: ${{ inputs.sarif_multitool_version }}"
                   
-                  # Verificar compatibilidade .NET
+                  # Verificar se .NET Core 3.1 está disponível
+                  if dotnet --list-runtimes | grep -q "3.1"; then
+                    echo "✅ .NET Core 3.1 disponível"
+                  else
+                    echo "❌ .NET Core 3.1 não encontrado"
+                    exit 1
+                  fi
+                  
                   echo "✅ SARIF MultiTool ${{ inputs.sarif_multitool_version }} configurado"
                   echo "SARIF_VERSION_OVERRIDE=${{ inputs.sarif_multitool_version }}" >> $GITHUB_ENV
 
@@ -102,10 +109,17 @@ jobs:
                   echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
                   export PATH="$HOME/.dotnet/tools:$PATH"
                   # Verificar se SARIF MultiTool funciona
+                  echo "🔍 Testando SARIF MultiTool..."
                   if sarif --version >/dev/null 2>&1; then
                     echo "✅ SARIF MultiTool pronto"
                   else
                     echo "❌ SARIF MultiTool não funciona"
+                    echo "🔍 Debug: Tentando executar sarif --version..."
+                    sarif --version
+                    echo "🔍 Debug: Verificando PATH..."
+                    echo $PATH
+                    echo "🔍 Debug: Verificando localização do sarif..."
+                    which sarif
                     exit 1
                   fi
 

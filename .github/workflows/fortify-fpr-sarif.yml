@@ -17,7 +17,7 @@ on:
             sarif_multitool_version:
                 description: 'Versão do SARIF MultiTool'
                 required: false
-                default: '4.7.0'
+                default: '4.5.4'
                 type: string
             validate_sarif:
                 description: 'Validar SARIF gerado'
@@ -34,7 +34,7 @@ jobs:
     convert:
         name: Fortify FPR to SARIF Conversion
         runs-on: ubuntu-latest
-        timeout-minutes: 90
+        timeout-minutes: 120
 
         steps:
             - name: Checkout repository
@@ -50,11 +50,22 @@ jobs:
               with:
                 dotnet-version: ${{ inputs.dotnet_version }}
 
+            - name: Install .NET Core 3.1 Runtime
+              run: |
+                  echo "🔧 Instalando .NET Core 3.1 Runtime para compatibilidade..."
+                  wget https://dotnet.microsoft.com/download/dotnet/scripts/v1/dotnet-install.sh
+                  chmod +x dotnet-install.sh
+                  ./dotnet-install.sh --runtime dotnet --version 3.1.32
+                  export DOTNET_ROOT="$HOME/.dotnet"
+                  export PATH="$HOME/.dotnet:$PATH"
+                  echo "✅ .NET Core 3.1.32 instalado"
+                  dotnet --list-runtimes
+
             - name: Cache .NET tools
               uses: actions/cache@v4
               with:
                 path: ~/.dotnet/tools
-                key: dotnet-tools-${{ inputs.sarif_multitool_version }}-${{ runner.os }}-${{ hashFiles('**/*.yml') }}
+                key: dotnet-tools-${{ inputs.sarif_multitool_version }}-${{ runner.os }}-${{ hashFiles('**/fortify-fpr-sarif.yml') }}
                 restore-keys: |
                   dotnet-tools-${{ inputs.sarif_multitool_version }}-${{ runner.os }}-
                   dotnet-tools-${{ inputs.sarif_multitool_version }}-
@@ -67,9 +78,7 @@ jobs:
                   echo "📋 Versão SARIF MultiTool solicitada: ${{ inputs.sarif_multitool_version }}"
                   
                   # Verificar compatibilidade .NET
-                  echo "📋 Verificando versões SARIF MultiTool disponíveis..."
-                  dotnet nuget list source
-                  echo "✅ SARIF MultiTool ${{ inputs.sarif_multitool_version }} é compatível com .NET 8.0"
+                  echo "✅ SARIF MultiTool ${{ inputs.sarif_multitool_version }} configurado"
                   echo "SARIF_VERSION_OVERRIDE=${{ inputs.sarif_multitool_version }}" >> $GITHUB_ENV
 
             - name: Install SARIF MultiTool
@@ -96,8 +105,8 @@ jobs:
                   if sarif --version >/dev/null 2>&1; then
                     echo "✅ SARIF MultiTool pronto"
                   else
-                    echo "❌ SARIF MultiTool não funciona - criando fallback"
-                    echo "FALLBACK_MODE=true" >> $GITHUB_ENV
+                    echo "❌ SARIF MultiTool não funciona"
+                    exit 1
                   fi
 
             - name: Fortify FPR Download and Convert
@@ -107,10 +116,7 @@ jobs:
                   fortify_ssc_api_url: ${{ secrets.FORTIFY_SSC_API_URL }}
                   fortify_unified_login_token: ${{ secrets.FORTIFY_UNIFIED_LOGIN_TOKEN }}
               run: |
-                  # ========== CONFIGURAÇÃO INICIAL ==========
                   set -euo pipefail
-                  
-                  # ========== FUNÇÕES UTILITÁRIAS OTIMIZADAS ==========
                   
                   # Função única de validação JSON (consolidada)
                   validate_json_response() {

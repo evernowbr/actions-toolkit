@@ -40,6 +40,36 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y jq curl unzip
 
+      - name: Diagnose connectivity
+        env:
+          FORTIFY_SSC_API_URL: ${{ secrets.FORTIFY_SSC_API_URL }}
+          FORTIFY_UNIFIED_LOGIN_TOKEN: ${{ secrets.FORTIFY_UNIFIED_LOGIN_TOKEN }}
+        run: |
+          echo "🔍 Diagnóstico de conectividade..."
+          echo "📋 Configuração:"
+          echo "   • URL: $FORTIFY_SSC_API_URL"
+          echo "   • Token: ${FORTIFY_UNIFIED_LOGIN_TOKEN:0:10}..."
+          
+          # Testar conectividade básica
+          echo "🌐 Testando conectividade básica..."
+          if curl -k -sSL --connect-timeout 10 --max-time 30 "$FORTIFY_SSC_API_URL" >/dev/null 2>&1; then
+              echo "✅ Servidor acessível"
+          else
+              echo "❌ Servidor não acessível"
+              echo "💡 Verifique se a URL está correta"
+          fi
+          
+          # Testar autenticação
+          echo "🔐 Testando autenticação..."
+          if curl -k -sSL --connect-timeout 10 --max-time 30 \
+              -H "Authorization: FortifyToken $FORTIFY_UNIFIED_LOGIN_TOKEN" \
+              "$FORTIFY_SSC_API_URL/api/v1/projectVersions" >/dev/null 2>&1; then
+              echo "✅ Autenticação OK"
+          else
+              echo "❌ Falha na autenticação"
+              echo "💡 Verifique se o token está correto"
+          fi
+
       - name: Verify and Download FPR
         env:
           FORTIFY_PROJECT_NAME: ${{ inputs.name }}
@@ -51,23 +81,70 @@ jobs:
           
           echo "📥 Verificando e baixando FPR existente..."
           
-          # Função para chamadas API
+          # Função para chamadas API com tratamento de erro robusto
           api_call() {
               local method="${1:-GET}"
               local url="$2"
               local context="$3"
               
-              curl -k -sSL --fail \
+              echo "🔗 Conectando ao SSC: $url"
+              
+              # Testar conectividade primeiro
+              if ! curl -k -sSL --connect-timeout 10 --max-time 30 \
+                  -H "Authorization: FortifyToken $FORTIFY_UNIFIED_LOGIN_TOKEN" \
+                  "$FORTIFY_SSC_API_URL/api/v1/projectVersions" >/dev/null 2>&1; then
+                  echo "❌ Erro de conectividade com o SSC"
+                  echo "🔍 Verificando configuração..."
+                  echo "   • URL: $FORTIFY_SSC_API_URL"
+                  echo "   • Token: ${FORTIFY_UNIFIED_LOGIN_TOKEN:0:10}..."
+                  echo "💡 Verifique se:"
+                  echo "   • O servidor SSC está acessível"
+                  echo "   • O token está correto"
+                  echo "   • A URL está correta"
+                  return 1
+              fi
+              
+              # Fazer chamada real
+              local response
+              local exit_code
+              
+              response=$(curl -k -sSL --connect-timeout 10 --max-time 30 \
                   -H "Content-Type: application/json" \
                   -H "Accept: application/json" \
                   -H "Authorization: FortifyToken $FORTIFY_UNIFIED_LOGIN_TOKEN" \
                   ${method:+-X "$method"} \
-                  "$url"
+                  "$url" 2>/dev/null)
+              exit_code=$?
+              
+              if [ $exit_code -ne 0 ]; then
+                  echo "❌ Falha na chamada API ($context): código $exit_code"
+                  return 1
+              fi
+              
+              if [ -z "$response" ]; then
+                  echo "❌ Resposta vazia da API ($context)"
+                  return 1
+              fi
+              
+              # Validar JSON
+              if ! echo "$response" | jq -e . >/dev/null 2>&1; then
+                  echo "❌ Resposta inválida da API ($context)"
+                  echo "Resposta: $response"
+                  return 1
+              fi
+              
+              echo "$response"
+              return 0
           }
           
           # Buscar projeto/versão
           echo "🔍 Buscando projeto: $FORTIFY_PROJECT_NAME/$FORTIFY_VERSION_NAME"
           project_response=$(api_call "GET" "$FORTIFY_SSC_API_URL/api/v1/projectVersions?q=$FORTIFY_PROJECT_NAME&fulltextsearch=true" "verificar projeto")
+          
+          if [ $? -ne 0 ]; then
+              echo "❌ Falha ao buscar projeto no SSC"
+              exit 1
+          fi
           
           version_id=$(echo "$project_response" | jq -r --arg proj "$FORTIFY_PROJECT_NAME" --arg ver "$FORTIFY_VERSION_NAME" \
               '.data[] | select(.project.name==$proj and .name==$ver) | .id')
@@ -75,6 +152,8 @@ jobs:
           if [ -z "$version_id" ] || [ "$version_id" == "null" ]; then
               echo "❌ Projeto/versão não encontrado: $FORTIFY_PROJECT_NAME/$FORTIFY_VERSION_NAME"
               echo "💡 Certifique-se de que o scan já foi executado"
+              echo "🔍 Projetos disponíveis:"
+              echo "$project_response" | jq -r '.data[] | "   • \(.project.name)/\(.name)"' 2>/dev/null || echo "   • Nenhum projeto encontrado"
               exit 1
           fi
           
@@ -85,12 +164,19 @@ jobs:
           echo "📋 Buscando artefatos FPR..."
           artifacts_response=$(api_call "GET" "$FORTIFY_SSC_API_URL/api/v1/projectVersions/$version_id/artifacts" "buscar artefatos")
           
+          if [ $? -ne 0 ]; then
+              echo "❌ Falha ao buscar artefatos no SSC"
+              exit 1
+          fi
+          
           # Pegar o FPR mais recente (ordenado por data)
           fpr_id=$(echo "$artifacts_response" | jq -r '.data[] | select(.name | endswith(".fpr")) | .id' | head -1)
           
           if [ -z "$fpr_id" ] || [ "$fpr_id" == "null" ]; then
               echo "❌ Nenhum FPR encontrado para este projeto/versão"
               echo "💡 Execute um scan Fortify antes de converter para SARIF"
+              echo "🔍 Artefatos disponíveis:"
+              echo "$artifacts_response" | jq -r '.data[] | "   • \(.name) (\(.id))"' 2>/dev/null || echo "   • Nenhum artefato encontrado"
               exit 1
           fi
           
@@ -101,17 +187,44 @@ jobs:
           fpr_filename="$(echo "$FORTIFY_PROJECT_NAME" | sed 's/\//-/g')-$FORTIFY_VERSION_NAME.fpr"
           
           echo "📥 Baixando FPR: $fpr_filename"
-          if curl -k -sSL \
-              -H "Authorization: FortifyToken $FORTIFY_UNIFIED_LOGIN_TOKEN" \
-              -H "Accept: application/octet-stream" \
-              "$FORTIFY_SSC_API_URL/api/v1/projectVersions/$version_id/artifacts/$fpr_id/content" \
-              -o "fortify-artifacts/$fpr_filename"; then
+          
+          # Download com retry e timeout
+          download_success=false
+          for attempt in {1..3}; do
+              echo "🔄 Tentativa $attempt de download..."
               
-              file_size=$(wc -c < "fortify-artifacts/$fpr_filename")
-              echo "✅ FPR baixado com sucesso: $fpr_filename ($((file_size/1024/1024))MB)"
-              echo "FPR_FILENAME=$fpr_filename" >> $GITHUB_ENV
-          else
-              echo "❌ Falha ao baixar FPR"
+              if curl -k -sSL --connect-timeout 30 --max-time 300 \
+                  -H "Authorization: FortifyToken $FORTIFY_UNIFIED_LOGIN_TOKEN" \
+                  -H "Accept: application/octet-stream" \
+                  "$FORTIFY_SSC_API_URL/api/v1/projectVersions/$version_id/artifacts/$fpr_id/content" \
+                  -o "fortify-artifacts/$fpr_filename"; then
+                  
+                  file_size=$(wc -c < "fortify-artifacts/$fpr_filename")
+                  if [ "$file_size" -gt 1024 ]; then
+                      echo "✅ FPR baixado com sucesso: $fpr_filename ($((file_size/1024/1024))MB)"
+                      echo "FPR_FILENAME=$fpr_filename" >> $GITHUB_ENV
+                      download_success=true
+                      break
+                  else
+                      echo "⚠️ Arquivo baixado muito pequeno ($file_size bytes), tentando novamente..."
+                      rm -f "fortify-artifacts/$fpr_filename"
+                  fi
+              else
+                  echo "⚠️ Tentativa $attempt falhou"
+                  if [ $attempt -lt 3 ]; then
+                      echo "⏳ Aguardando 10 segundos antes da próxima tentativa..."
+                      sleep 10
+                  fi
+              fi
+          done
+          
+          if [ "$download_success" = false ]; then
+              echo "❌ Falha ao baixar FPR após 3 tentativas"
+              echo "🔍 Verificando conectividade..."
+              curl -k -sSL --connect-timeout 10 \
+                  -H "Authorization: FortifyToken $FORTIFY_UNIFIED_LOGIN_TOKEN" \
+                  "$FORTIFY_SSC_API_URL/api/v1/projectVersions" >/dev/null 2>&1 && \
+                  echo "✅ Conectividade OK" || echo "❌ Problema de conectividade"
               exit 1
           fi
 

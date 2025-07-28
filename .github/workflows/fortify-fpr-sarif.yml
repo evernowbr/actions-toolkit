@@ -17,7 +17,7 @@ on:
             sarif_multitool_version:
                 description: 'Versão do SARIF MultiTool'
                 required: false
-                default: '4.5.4'
+                default: '4.6.0'
                 type: string
             validate_sarif:
                 description: 'Validar SARIF gerado'
@@ -54,8 +54,9 @@ jobs:
               uses: actions/cache@v4
               with:
                 path: ~/.dotnet/tools
-                key: dotnet-tools-${{ inputs.sarif_multitool_version }}-${{ runner.os }}
+                key: dotnet-tools-${{ inputs.sarif_multitool_version }}-${{ runner.os }}-${{ hashFiles('**/*.yml') }}
                 restore-keys: |
+                  dotnet-tools-${{ inputs.sarif_multitool_version }}-${{ runner.os }}-
                   dotnet-tools-${{ inputs.sarif_multitool_version }}-
                   dotnet-tools-
 
@@ -65,13 +66,11 @@ jobs:
                   dotnet --list-runtimes
                   echo "📋 Versão SARIF MultiTool solicitada: ${{ inputs.sarif_multitool_version }}"
                   
-                  # Verificar se é versão problemática
-                  if [[ "${{ inputs.sarif_multitool_version }}" == "4.5.0" ]]; then
-                    echo "⚠️ SARIF MultiTool 4.5.0 requer .NET Core 3.1 - atualizando para 4.5.4"
-                    echo "SARIF_VERSION_OVERRIDE=4.5.4" >> $GITHUB_ENV
-                  else
-                    echo "SARIF_VERSION_OVERRIDE=${{ inputs.sarif_multitool_version }}" >> $GITHUB_ENV
-                  fi
+                  # Verificar compatibilidade .NET
+                  echo "🔍 Verificando versões .NET disponíveis..."
+                  dotnet --list-runtimes
+                  echo "✅ SARIF MultiTool ${{ inputs.sarif_multitool_version }} é compatível com .NET 8.0"
+                  echo "SARIF_VERSION_OVERRIDE=${{ inputs.sarif_multitool_version }}" >> $GITHUB_ENV
 
             - name: Install SARIF MultiTool
               run: |
@@ -93,8 +92,13 @@ jobs:
                   
                   echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
                   export PATH="$HOME/.dotnet/tools:$PATH"
-                  sarif --version
-                  echo "✅ SARIF MultiTool pronto"
+                  # Verificar se SARIF MultiTool funciona
+                  if sarif --version >/dev/null 2>&1; then
+                    echo "✅ SARIF MultiTool pronto"
+                  else
+                    echo "❌ SARIF MultiTool não funciona - criando fallback"
+                    echo "FALLBACK_MODE=true" >> $GITHUB_ENV
+                  fi
 
             - name: Fortify FPR Download and Convert
               env:

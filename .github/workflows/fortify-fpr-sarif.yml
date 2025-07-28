@@ -17,7 +17,7 @@ on:
             sarif_multitool_version:
                 description: 'Versão do SARIF MultiTool'
                 required: false
-                default: '4.6.0'
+                default: '4.7.0'
                 type: string
             validate_sarif:
                 description: 'Validar SARIF gerado'
@@ -67,8 +67,8 @@ jobs:
                   echo "📋 Versão SARIF MultiTool solicitada: ${{ inputs.sarif_multitool_version }}"
                   
                   # Verificar compatibilidade .NET
-                  echo "🔍 Verificando versões .NET disponíveis..."
-                  dotnet --list-runtimes
+                  echo "📋 Verificando versões SARIF MultiTool disponíveis..."
+                  dotnet nuget list source
                   echo "✅ SARIF MultiTool ${{ inputs.sarif_multitool_version }} é compatível com .NET 8.0"
                   echo "SARIF_VERSION_OVERRIDE=${{ inputs.sarif_multitool_version }}" >> $GITHUB_ENV
 

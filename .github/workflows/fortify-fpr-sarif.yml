@@ -17,7 +17,7 @@ on:
             sarif_multitool_version:
                 description: 'Versão do SARIF MultiTool'
                 required: false
-                default: '4.5.0'
+                default: '4.5.4'
                 type: string
             validate_sarif:
                 description: 'Validar SARIF gerado'
@@ -59,12 +59,26 @@ jobs:
                   dotnet-tools-${{ inputs.sarif_multitool_version }}-
                   dotnet-tools-
 
+            - name: Validate .NET compatibility
+              run: |
+                  echo "🔍 Verificando compatibilidade .NET..."
+                  dotnet --list-runtimes
+                  echo "📋 Versão SARIF MultiTool solicitada: ${{ inputs.sarif_multitool_version }}"
+                  
+                  # Verificar se é versão problemática
+                  if [[ "${{ inputs.sarif_multitool_version }}" == "4.5.0" ]]; then
+                    echo "⚠️ SARIF MultiTool 4.5.0 requer .NET Core 3.1 - atualizando para 4.5.4"
+                    echo "SARIF_VERSION_OVERRIDE=4.5.4" >> $GITHUB_ENV
+                  else
+                    echo "SARIF_VERSION_OVERRIDE=${{ inputs.sarif_multitool_version }}" >> $GITHUB_ENV
+                  fi
+
             - name: Install SARIF MultiTool
               run: |
-                  echo "🔧 Instalando SARIF MultiTool v${{ inputs.sarif_multitool_version }}..."
+                  echo "🔧 Instalando SARIF MultiTool v$SARIF_VERSION_OVERRIDE..."
                   
                   for attempt in {1..3}; do
-                    if dotnet tool install --global Sarif.Multitool --version ${{ inputs.sarif_multitool_version }}; then
+                    if dotnet tool install --global Sarif.Multitool --version $SARIF_VERSION_OVERRIDE; then
                       echo "✅ SARIF MultiTool instalado com sucesso (tentativa $attempt)"
                       break
                     else

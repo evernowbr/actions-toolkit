@@ -57,24 +57,38 @@ jobs:
           echo "No existing 'latest' tag to delete"
         fi
 
-    - name: Build and push Docker image
-      run: |
-        docker build -t us-central1-docker.pkg.dev/evernow-lab/applications/${{ env.IMAGE_NAME }}:${{ env.RELEASE_VERSION }} .
-        docker push us-central1-docker.pkg.dev/evernow-lab/applications/${{ env.IMAGE_NAME }}:${{ env.RELEASE_VERSION }}
-
-    - name: Add 'latest' tag to new image via digest
+    - name: Build Docker image
       run: |
         IMAGE_URL=us-central1-docker.pkg.dev/evernow-lab/applications/${{ env.IMAGE_NAME }}
-        DIGEST=$(gcloud artifacts docker tags list $IMAGE_URL \
-          --filter="tag=${{ env.RELEASE_VERSION }}" \
-          --format="value(version)" | head -n1)
+        docker build -t $IMAGE_URL:${{ env.RELEASE_VERSION }} .
+
+    - name: Push Docker image and get digest
+      id: push
+      run: |
+        IMAGE_URL=us-central1-docker.pkg.dev/evernow-lab/applications/${{ env.IMAGE_NAME }}
+        
+        # Push image
+        docker push $IMAGE_URL:${{ env.RELEASE_VERSION }}
+        
+        # Get digest after push
+        DIGEST=$(gcloud artifacts docker images describe $IMAGE_URL:${{ env.RELEASE_VERSION }} \
+          --format="value(image_summary.digest)")
+
+        echo "DIGEST=$DIGEST" >> $GITHUB_ENV
+        echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+        echo "Image pushed and digest captured: $DIGEST"
+    
+    - name: Tag pushed image as 'latest'
+      run: |
+        IMAGE_URL=us-central1-docker.pkg.dev/evernow-lab/applications/${{ env.IMAGE_NAME }}
+        DIGEST=${{ env.DIGEST }}
 
         if [ -n "$DIGEST" ]; then
-          echo "Adding 'latest' tag to digest: $DIGEST"
+          echo "Tagging $IMAGE_URL@$DIGEST as latest"
           gcloud artifacts docker tags add \
             $IMAGE_URL@$DIGEST \
             $IMAGE_URL:latest
         else
-          echo "ERROR: Digest for tag ${{ env.RELEASE_VERSION }} not found"
+          echo "ERROR: Digest not found"
           exit 1
         fi

@@ -768,7 +768,7 @@ jobs:
                   # Executa scan
                   echo "🔧 Executando ScanCentral..."
                   scan_output=$($fortify_scancentral_tool -ssctoken "$fortify_controller_token" -url "$fortify_controller_url" start -skipBuild -block --log-file fortify.log --overwrite -application "$fortify_project_name" -version "$fortify_version_name" --upload-to-ssc --ssc-upload-token "$fortify_controller_token" 2>&1)
-                  
+                  echo "$scan_output"
                   if [ $? -eq 0 ]; then
                       job_token=$(echo "$scan_output" | grep "Submitted job and received token" | grep -E -o "[a-f0-9-]{36}" || echo "")
                       if [ -n "$job_token" ]; then
@@ -778,6 +778,7 @@ jobs:
                       fi
                   else
                       echo "❌ Falha no scan"
+                      echo "$scan_output"
                       exit 1
                   fi
                   

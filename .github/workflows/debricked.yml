@@ -1,4 +1,4 @@
-name: Debricked SCA
+name: Debricked
 on:
   workflow_call:
     secrets:
@@ -7,7 +7,7 @@ on:
 
 jobs:
   scan:
-    name: Debricked SCA Scan
+    name: Debricked
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

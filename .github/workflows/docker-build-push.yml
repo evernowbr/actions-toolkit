@@ -6,8 +6,6 @@ on:
     secrets:
       GCP_SERVICE_ACCOUNT_KEY:
         required: true
-      GITHUB_TOKEN:
-        required: true
 
 jobs:
   docker:

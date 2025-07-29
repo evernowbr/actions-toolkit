@@ -4,6 +4,7 @@ name: Auto Tag and Changelog
 on:
   push:
     branches: [ "main" ]  # Trigger on push/merge to main
+  workflow_call:
 
 jobs:
   release:

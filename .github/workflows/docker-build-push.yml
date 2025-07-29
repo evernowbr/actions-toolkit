@@ -2,8 +2,7 @@
 name: Build and Push Docker Image to Google Artifact Registry
 
 on:
-  release:
-    types: [published]  # Trigger only when a new release is created
+  workflow_call:
 
 jobs:
   docker:

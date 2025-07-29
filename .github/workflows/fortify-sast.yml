@@ -48,7 +48,6 @@ jobs:
                   fortify_controller_token: ${{ secrets.FORTIFY_CONTROLLER_TOKEN }}
               run: |
                   # ========== CONFIGURAÇÃO INICIAL ==========
-                  set -euo pipefail
                   export PATH="$PATH:/opt/Fortify_ScanCentral_Client_25.2.0_x64/bin"
                   
                   # ========== FUNÇÕES UTILITÁRIAS OTIMIZADAS ==========

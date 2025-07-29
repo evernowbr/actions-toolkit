@@ -1,4 +1,4 @@
-name: Fortify FPR to SARIF Converter
+name: Fortify-Sarif-Converter
 
 on:
   workflow_call:
@@ -27,7 +27,7 @@ on:
 
 jobs:
   convert:
-    name: Fortify FPR to SARIF Conversion
+    name: Fortify-Sarif-Converter
     runs-on: ubuntu-latest
     timeout-minutes: 30
 

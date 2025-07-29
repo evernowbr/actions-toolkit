@@ -34,6 +34,9 @@ jobs:
         runs-on: self-hosted
 
         steps:
+            - name: Checkout do repositório
+              uses: actions/checkout@v4
+                  
             - name: Run Scan
               env:
                   fortify_project_name: ${{ inputs.name }}

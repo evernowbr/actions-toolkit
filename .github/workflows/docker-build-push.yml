@@ -3,6 +3,11 @@ name: Build and Push Docker Image to Google Artifact Registry
 
 on:
   workflow_call:
+    secrets:
+      GCP_SERVICE_ACCOUNT_KEY:
+        required: true
+      GITHUB_TOKEN:
+        required: true
 
 jobs:
   docker:

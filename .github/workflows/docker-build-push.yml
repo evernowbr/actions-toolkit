@@ -1,8 +1,12 @@
-# .github/workflows/docker-push.yml
+# docker-build-push.yml
 name: Build and Push Docker Image to Google Artifact Registry
 
 on:
   workflow_call:
+    inputs:
+      RELEASE_VERSION:
+        required: true
+        type: string
     secrets:
       GCP_SERVICE_ACCOUNT_KEY:
         required: true
@@ -24,11 +28,10 @@ jobs:
         echo "IMAGE_NAME=$IMAGE_NAME" >> $GITHUB_ENV
         echo "Using IMAGE_NAME=$IMAGE_NAME"
 
-    - name: Extract version from release
-      id: vars
+    - name: Set release version from input
       run: |
-        echo "RELEASE_VERSION=${GITHUB_REF##*/}" >> $GITHUB_ENV
-        echo "Release version: ${GITHUB_REF##*/}"
+        echo "RELEASE_VERSION=${{ inputs.RELEASE_VERSION }}" >> $GITHUB_ENV
+        echo "Using RELEASE_VERSION=${{ inputs.RELEASE_VERSION }}"
 
     - name: Authenticate to Google Cloud
       uses: google-github-actions/auth@v2

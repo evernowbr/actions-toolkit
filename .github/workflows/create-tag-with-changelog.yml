@@ -3,12 +3,18 @@ name: Auto Tag and Changelog
 
 on:
   push:
-    branches: [ "main" ]  # Trigger on push/merge to main
+    branches: [ "main" ]
   workflow_call:
+    outputs:
+      release_version:
+        description: "The new release version"
+        value: ${{ jobs.release.outputs.new_tag }}
 
 jobs:
   release:
     runs-on: ubuntu-latest
+    outputs:
+      new_tag: ${{ steps.new_tag.outputs.new_tag }}
 
     steps:
     - name: Checkout

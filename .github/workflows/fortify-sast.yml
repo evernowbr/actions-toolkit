@@ -30,7 +30,7 @@ on:
 
 jobs:
     scan:
-        name: Fortify SAST Scan
+        name: Fortify SAST
         runs-on: self-hosted
 
         steps:

@@ -6,64 +6,50 @@ on:
       name:
         required: true
         type: string
-        description: 'Nome do projeto Fortify'
       version:
         required: true
         type: string
-        description: 'Versão do projeto Fortify'
       fortify_scancentral_tool:
-        description: 'Ferramenta ScanCentral'
         required: false
         default: 'scancentral'
         type: string
       fortify_translate_name:
-        description: 'Parâmetros de tradução'
         required: false
         default: '-bt none'
         type: string
       fortify_translate_additional_flags:
-        description: 'Flags adicionais do tradutor'
         required: false
         default: ''
         type: string
       dotnet_version:
-        description: 'Versão do .NET SDK'
         required: false
         default: '8.0.x'
         type: string
       validate_sarif:
-        description: 'Validar SARIF gerado'
         required: false
         default: 'true'
         type: string
       scan_timeout_minutes:
-        description: 'Timeout do scan em minutos'
         required: false
         default: 60
         type: number
       processing_timeout_minutes:
-        description: 'Timeout do processamento em minutos'
         required: false
         default: 45
         type: number
       max_polling_attempts:
-        description: 'Máximo de tentativas de polling'
         required: false
         default: 45
         type: number
     secrets:
       FORTIFY_SSC_API_URL:
         required: true
-        description: 'URL da API do Fortify SSC'
       FORTIFY_UNIFIED_LOGIN_TOKEN:
         required: true
-        description: 'Token de autenticação Fortify'
       FORTIFY_CONTROLLER_URL:
         required: true
-        description: 'URL do Controller Fortify'
       FORTIFY_CONTROLLER_TOKEN:
         required: true
-        description: 'Token do Controller Fortify'
 
 jobs:
   # ========== JOB 1: SCAN + PUBLISH (Self-hosted) ==========
@@ -282,7 +268,27 @@ jobs:
               echo "✅ Projeto e versão já existem (ID: $version_id)"
           elif [[ -n "$project_id" ]] && [[ "$project_id" != "null" ]]; then
               echo "📋 Projeto existe, criando versão..."
-              version_id=$(create_project_version "$PROJECT_NAME" "$VERSION_NAME")
+              # Criar versão para projeto existente
+              local version_payload=$(jq -nc \
+                  --arg project_name "$PROJECT_NAME" \
+                  --arg project_id "$project_id" \
+                  --arg version_name "$VERSION_NAME" \
+                  '{
+                      "project": {"name": $project_name, "id": $project_id},
+                      "issueTemplateId": "Prioritized-HighRisk-Project-Template",
+                      "name": $version_name
+                  }')
+              
+              local version_response
+              version_response=$(api_call_with_retry "POST" "$FORTIFY_SSC_API_URL/api/v1/projectVersions" "$version_payload" "criar versão")
+              
+              if [[ $? -eq 0 ]]; then
+                  version_id=$(echo "$version_response" | jq -r '.data.id')
+                  echo "✅ Versão criada: $VERSION_NAME (ID: $version_id)"
+              else
+                  echo "❌ Falha ao criar versão"
+                  exit 1
+              fi
           else
               echo "📋 Criando projeto e versão..."
               version_id=$(create_project_version "$PROJECT_NAME" "$VERSION_NAME")
@@ -344,6 +350,25 @@ jobs:
           }
           
           fortify_configurar_projeto "$version_id"
+          
+          # Configurar regras de processamento
+          fortify_regras_processamento() {
+              local version_id="$1"
+              
+              local rules_payload='[{"identifier": "com.fortify.manager.BLL.processingrules.BuildProjectProcessingRule","displayName": "Require approval if the Build Project is different between scans","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.FileCountProcessingRule","displayName": "Require approval if file count differs by more than 10%","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.LOCCountProcessingRule","displayName": "Require approval if line count differs by more than 10%","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.NewerEngineVersionProcessingRule","displayName": "Require approval if the engine version of a scan is newer than the engine version of the previous scan","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.RulePackVersionProcessingRule","displayName": "Require approval if the rulepacks used in the scan do not match the rulepacks used in the previous scan","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.WarningProcessingRule","displayName": "Require approval if result has analysis warnings","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.ExternalListVersionProcessingRule","displayName": "Check external metadata file versions in scan against versions on server.","displayable": true,"enabled": false}]'
+              
+              local response
+              response=$(api_call_with_retry "PUT" "$FORTIFY_SSC_API_URL/api/v1/projectVersions/$version_id/resultProcessingRules" "$rules_payload" "configurar regras")
+              
+              if [[ $? -eq 0 ]]; then
+                  echo "✅ Regras de processamento configuradas"
+              else
+                  echo "❌ Falha ao configurar regras de processamento"
+                  return 1
+              fi
+          }
+          
+          fortify_regras_processamento "$version_id"
           
           # Executar ScanCentral com validação
           echo "🔧 Executando ScanCentral..."

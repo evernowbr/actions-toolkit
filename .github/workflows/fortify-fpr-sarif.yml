@@ -282,7 +282,7 @@ jobs:
               echo "✅ Projeto e versão já existem (ID: $version_id)"
           elif [[ -n "$project_id" ]] && [[ "$project_id" != "null" ]]; then
               echo "📋 Projeto existe, criando versão..."
-              version_id=$(create_version "$project_id" "$PROJECT_NAME" "$VERSION_NAME")
+              version_id=$(create_project_version "$PROJECT_NAME" "$VERSION_NAME")
           else
               echo "📋 Criando projeto e versão..."
               version_id=$(create_project_version "$PROJECT_NAME" "$VERSION_NAME")

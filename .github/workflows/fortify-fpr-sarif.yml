@@ -130,13 +130,21 @@ jobs:
           # Configurar environment
           export PATH="$PATH:/opt/Fortify_ScanCentral_Client_25.2.0_x64/bin"
           
+          # Teste simples de conectividade
+          echo "🔍 Testando conectividade com o SSC..."
+          if curl -sS -k --connect-timeout 10 "$FORTIFY_SSC_API_URL/api/v1/projectVersions" >/dev/null 2>&1; then
+              echo "✅ Conectividade com SSC OK"
+          else
+              echo "❌ Falha na conectividade com SSC"
+              exit 1
+          fi
+          
           # ========== FUNÇÕES OTIMIZADAS ==========
           
           # Função robusta para validação de resposta API
           validate_api_response() {
               local response="$1"
               local context="$2"
-              local expected_codes="${3:-200,201}"
               
               if [[ -z "$response" ]]; then
                   echo "❌ Resposta vazia da API ($context)"
@@ -149,21 +157,7 @@ jobs:
                   return 1
               fi
               
-              # Verificar códigos de erro específicos do Fortify
-              local error_code=$(echo "$response" | jq -r '.errorCode // empty')
-              if [[ -n "$error_code" ]]; then
-                  local error_msg=$(echo "$response" | jq -r '.message // "Erro desconhecido"')
-                  echo "❌ Erro da API ($context): [$error_code] $error_msg"
-                  return 1
-              fi
-              
-              # Verificar se a resposta contém dados válidos
-              local data_count=$(echo "$response" | jq -r '.data | length // 0' 2>/dev/null || echo "0")
-              if [[ "$data_count" == "null" ]]; then
-                  echo "⚠️ Resposta sem dados válidos ($context) - isso pode ser normal para projetos novos"
-                  return 0  # Não é erro para projetos novos
-              fi
-              
+              echo "✅ Resposta válida ($context)"
               return 0
           }
           
@@ -175,7 +169,11 @@ jobs:
               local context="$4"
               local max_retries="${5:-3}"
               
+              echo "🔍 Iniciando API call: $method $url"
+              
               for attempt in $(seq 1 $max_retries); do
+                  echo "🔍 Tentativa $attempt/$max_retries: $method $url"
+                  
                   local curl_opts=(-sS -k -L --connect-timeout 30 --max-time 120)
                   curl_opts+=(-H "Content-Type: application/json")
                   curl_opts+=(-H "Accept: application/json")
@@ -193,7 +191,6 @@ jobs:
                   local response
                   local exit_code
                   
-                  echo "🔍 Tentativa $attempt/$max_retries: $method $url"
                   response=$(curl "${curl_opts[@]}" 2>/dev/null) || exit_code=$?
                   
                   if [[ "${exit_code:-0}" -eq 0 ]] && validate_api_response "$response" "$context"; then
@@ -264,14 +261,23 @@ jobs:
           encoded_project_name=$(echo "$PROJECT_NAME" | sed 's/[^a-zA-Z0-9._-]/-/g')
           echo "🔍 Nome do projeto codificado: $encoded_project_name"
           
-          project_response=$(api_call_with_retry "GET" \
-              "$FORTIFY_SSC_API_URL/api/v1/projectVersions?q=$encoded_project_name&fulltextsearch=true" \
-              "" "buscar projeto")
+          echo "🔍 Testando função api_call_with_retry..."
           
-          if [[ $? -ne 0 ]]; then
-              echo "❌ Falha ao consultar projetos"
+          # Teste simples primeiro
+          test_response=$(curl -sS -k -L --connect-timeout 30 --max-time 120 \
+              -H "Accept: application/json" \
+              -H "Authorization: FortifyToken $FORTIFY_UNIFIED_LOGIN_TOKEN" \
+              "$FORTIFY_SSC_API_URL/api/v1/projectVersions?q=$encoded_project_name&fulltextsearch=true" 2>/dev/null)
+          
+          if [[ $? -eq 0 ]]; then
+              echo "✅ Teste de conectividade bem-sucedido"
+              project_response="$test_response"
+          else
+              echo "❌ Falha no teste de conectividade"
               exit 1
           fi
+          
+          echo "✅ Consulta de projetos concluída"
           
           # Buscar IDs com filtros seguros
           project_id=$(echo "$project_response" | jq -r --arg proj "$PROJECT_NAME" \

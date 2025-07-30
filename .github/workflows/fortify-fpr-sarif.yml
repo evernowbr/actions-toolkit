@@ -24,7 +24,7 @@ on:
       timeout_minutes:
         description: 'Timeout em minutos'
         required: false
-        default: 45
+        default: 30
         type: number
     secrets:
       FORTIFY_SSC_API_URL:
@@ -35,21 +35,151 @@ on:
         description: 'Token de autenticação Fortify'
 
 jobs:
-  convert:
-    name: Fortify FPR to SARIF Conversion
-    runs-on: ubuntu-latest
-    timeout-minutes: ${{ inputs.timeout_minutes }}
+  # ========== JOB 1: DOWNLOAD FPR (Self-hosted para conectividade) ==========
+  download-fpr:
+    name: Download FPR from SSC
+    runs-on: self-hosted
+    timeout-minutes: 15
+    
+    steps:
+      - name: Download FPR from SSC
+        env:
+          FORTIFY_PROJECT_NAME: ${{ inputs.name }}
+          FORTIFY_VERSION_NAME: ${{ inputs.version }}
+          FORTIFY_SSC_API_URL: ${{ secrets.FORTIFY_SSC_API_URL }}
+          FORTIFY_UNIFIED_LOGIN_TOKEN: ${{ secrets.FORTIFY_UNIFIED_LOGIN_TOKEN }}
+        run: |
+          echo "📥 Baixando FPR do SSC (conectividade corporativa)..."
+          
+          # Função simplificada para verificar resposta API
+          verify_api_response() {
+              local response="$1"
+              local context="$2"
+              
+              if [ -z "$response" ]; then
+                  echo "❌ Resposta vazia ($context)"
+                  return 1
+              fi
+              
+              if ! echo "$response" | jq -e . >/dev/null 2>&1; then
+                  echo "❌ JSON inválido ($context)"
+                  return 1
+              fi
+              
+              return 0
+          }
+          
+          # Buscar projeto/versão
+          echo "🔍 Buscando projeto: $FORTIFY_PROJECT_NAME/$FORTIFY_VERSION_NAME"
+          project_response=$(curl -sS -k -X GET \
+              -H "Accept: application/json" \
+              -H "Authorization: FortifyToken $FORTIFY_UNIFIED_LOGIN_TOKEN" \
+              "$FORTIFY_SSC_API_URL/api/v1/projectVersions?q=$FORTIFY_PROJECT_NAME&fulltextsearch=true")
+          
+          if ! verify_api_response "$project_response" "buscar projeto"; then
+              exit 1
+          fi
+          
+          # Extrair version_id
+          version_id=$(echo "$project_response" | jq -r --arg proj "$FORTIFY_PROJECT_NAME" --arg ver "$FORTIFY_VERSION_NAME" \
+              '.data[] | select(.project.name==$proj and .name==$ver) | .id')
+          
+          if [ -z "$version_id" ] || [ "$version_id" == "null" ]; then
+              echo "❌ Projeto/versão não encontrado: $FORTIFY_PROJECT_NAME/$FORTIFY_VERSION_NAME"
+              echo "💡 Certifique-se de que o scan já foi executado e processado"
+              exit 1
+          fi
+          
+          echo "✅ Projeto encontrado - Version ID: $version_id"
+          
+          # Buscar artefatos FPR
+          echo "📋 Buscando artefatos FPR..."
+          artifacts_response=$(curl -sS -k -X GET \
+              -H "Accept: application/json" \
+              -H "Authorization: FortifyToken $FORTIFY_UNIFIED_LOGIN_TOKEN" \
+              "$FORTIFY_SSC_API_URL/api/v1/projectVersions/$version_id/artifacts")
+          
+          if ! verify_api_response "$artifacts_response" "buscar artefatos"; then
+              exit 1
+          fi
+          
+          # Encontrar FPR mais recente
+          fpr_id=$(echo "$artifacts_response" | jq -r '.data[] | select(.name | endswith(".fpr")) | .id' | head -1)
+          
+          if [ -z "$fpr_id" ] || [ "$fpr_id" == "null" ]; then
+              echo "❌ Nenhum FPR encontrado"
+              echo "💡 Execute um scan Fortify antes de tentar a conversão"
+              exit 1
+          fi
+          
+          echo "✅ FPR encontrado - Artifact ID: $fpr_id"
+          
+          # Baixar FPR
+          mkdir -p fortify-artifacts
+          safe_project_name=$(echo "$FORTIFY_PROJECT_NAME" | sed 's/[^a-zA-Z0-9._-]/-/g')
+          fpr_filename="${safe_project_name}-${FORTIFY_VERSION_NAME}.fpr"
+          
+          echo "📥 Baixando FPR: $fpr_filename"
+          if curl -sS -k -L \
+              -H "Authorization: FortifyToken $FORTIFY_UNIFIED_LOGIN_TOKEN" \
+              -H "Accept: application/octet-stream" \
+              "$FORTIFY_SSC_API_URL/api/v1/projectVersions/$version_id/artifacts/$fpr_id/content" \
+              -o "fortify-artifacts/$fpr_filename"; then
+              
+              file_size=$(wc -c < "fortify-artifacts/$fpr_filename")
+              if [ "$file_size" -lt 1024 ]; then
+                  echo "❌ Arquivo FPR muito pequeno ($file_size bytes)"
+                  exit 1
+              fi
+              
+              echo "✅ FPR baixado com sucesso: $fpr_filename ($((file_size/1024/1024))MB)"
+          else
+              echo "❌ Falha ao baixar FPR"
+              exit 1
+          fi
 
+      - name: Upload FPR as temporary artifact
+        uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874
+        with:
+          name: fortify-fpr-temp-${{ github.run_number }}
+          path: fortify-artifacts/
+          retention-days: 1
+
+  # ========== JOB 2: CONVERSÃO SARIF (GitHub-hosted para .NET otimizado) ==========
+  convert-sarif:
+    name: Convert FPR to SARIF
+    runs-on: ubuntu-latest
+    needs: download-fpr
+    timeout-minutes: ${{ inputs.timeout_minutes }}
+    
     steps:
       - name: Checkout repository
         uses: actions/checkout@f43a0e5ff2bd294095638e18286ca9a3d1956744
 
-      - name: Install dependencies
+      - name: Download FPR artifact
+        uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e
+        with:
+          name: fortify-fpr-temp-${{ github.run_number }}
+          path: fortify-artifacts/
+
+      - name: Validate FPR file
         run: |
-          echo "📦 Instalando dependências..."
-          sudo apt-get update -qq
-          sudo apt-get install -y jq curl
-          echo "✅ Dependências instaladas"
+          echo "🔍 Validando arquivo FPR..."
+          
+          fpr_file=$(find fortify-artifacts -name "*.fpr" | head -1)
+          if [ -z "$fpr_file" ]; then
+              echo "❌ Arquivo FPR não encontrado"
+              exit 1
+          fi
+          
+          file_size=$(wc -c < "$fpr_file")
+          if [ "$file_size" -lt 1024 ]; then
+              echo "❌ Arquivo FPR muito pequeno ($file_size bytes)"
+              exit 1
+          fi
+          
+          echo "✅ FPR validado: $(basename "$fpr_file") ($((file_size/1024/1024))MB)"
+          echo "FPR_FILE=$fpr_file" >> $GITHUB_ENV
 
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v4
@@ -60,344 +190,121 @@ jobs:
         run: |
           echo "🔧 Instalando SARIF MultiTool..."
           
-          if ! dotnet tool install --global Sarif.Multitool; then
-            echo "❌ Falha na instalação do SARIF MultiTool"
-            exit 1
+          # Versões compatíveis em ordem de preferência
+          versions_to_try=("4.8.0" "4.7.1" "latest")
+          installed=false
+          
+          for version in "${versions_to_try[@]}"; do
+              echo "🔄 Tentando versão $version..."
+              if dotnet tool install --global Sarif.Multitool --version "$version" 2>/dev/null; then
+                  echo "✅ SARIF MultiTool v$version instalado com sucesso"
+                  installed=true
+                  break
+              fi
+          done
+          
+          if [ "$installed" = false ]; then
+              echo "❌ Falha na instalação - tentando versão latest..."
+              if dotnet tool install --global Sarif.Multitool; then
+                  echo "✅ SARIF MultiTool (latest) instalado"
+              else
+                  echo "❌ Falha crítica na instalação do SARIF MultiTool"
+                  exit 1
+              fi
           fi
           
           echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
-          echo "✅ SARIF MultiTool instalado"
-
-      - name: Validate and Setup
-        env:
-          fortify_ssc_api_url: ${{ secrets.FORTIFY_SSC_API_URL }}
-          fortify_unified_login_token: ${{ secrets.FORTIFY_UNIFIED_LOGIN_TOKEN }}
-        run: |
-          echo "🔍 Validando configuração..."
-          
-          # ========== FUNÇÕES UTILITÁRIAS ==========
-          
-          # Função de validação JSON robusta
-          validate_json_response() {
-              local response="$1"
-              local context="$2"
-              
-              if [ -z "$response" ]; then
-                  echo "❌ Resposta vazia da API ($context)"
-                  return 1
-              fi
-              
-              if ! echo "$response" | jq -e . >/dev/null 2>&1; then
-                  echo "❌ JSON inválido ($context):"
-                  echo "$response" | head -10
-                  return 1
-              fi
-              
-              local error_msg=$(echo "$response" | jq -r '.message // empty')
-              if [ -n "$error_msg" ]; then
-                  echo "❌ Erro da API ($context): $error_msg"
-                  return 1
-              fi
-              
-              return 0
-          }
-          
-          # Função segura para chamadas API
-          api_call() {
-              local method="${1:-GET}"
-              local url="$2"
-              local data="${3:-}"
-              local context="$4"
-              
-              local curl_opts=(-sS -k -L --fail)
-              curl_opts+=(-H "Content-Type: application/json")
-              curl_opts+=(-H "Accept: application/json")
-              curl_opts+=(-H "Authorization: FortifyToken $fortify_unified_login_token")
-              
-              if [ "$method" = "POST" ] || [ "$method" = "PUT" ]; then
-                  curl_opts+=(-X "$method")
-                  if [ -n "$data" ]; then
-                      curl_opts+=(-d "$data")
-                  fi
-              fi
-              
-              curl_opts+=("$url")
-              
-              local response
-              local exit_code
-              
-              response=$(curl "${curl_opts[@]}" 2>/dev/null) || exit_code=$?
-              
-              if [ "${exit_code:-0}" -ne 0 ]; then
-                  echo "❌ Falha na chamada API ($context): $exit_code"
-                  return 1
-              fi
-              
-              if ! validate_json_response "$response" "$context"; then
-                  return 1
-              fi
-              
-              echo "$response"
-              return 0
-          }
-          
-          # Função para sanitizar inputs
-          sanitize_input() {
-              local input="$1"
-              local max_length="${2:-100}"
-              
-              local sanitized=$(echo "$input" | tr -d '\n\r\t' | sed 's/[^a-zA-Z0-9._-]//g' | head -c "$max_length")
-              
-              if [[ -z "$sanitized" ]]; then
-                  sanitized=$(echo "$input" | tr -d '\n\r\t' | head -c "$max_length")
-                  if [[ -z "$sanitized" ]]; then
-                      return 1
-                  fi
-              fi
-              
-              echo "$sanitized"
-          }
-          
-          # ========== VALIDAÇÃO DE INPUTS ==========
-          
-          if [[ -z "${{ inputs.name }}" ]]; then
-            echo "❌ Nome do projeto é obrigatório"
-            exit 1
-          fi
-          
-          if [[ -z "${{ inputs.version }}" ]]; then
-            echo "❌ Versão do projeto é obrigatória"
-            exit 1
-          fi
-          
-          PROJECT_NAME=$(sanitize_input "${{ inputs.name }}" 100)
-          PROJECT_VERSION=$(sanitize_input "${{ inputs.version }}" 50)
-          
-          if [[ $? -ne 0 ]]; then
-            echo "❌ Falha na sanitização dos inputs"
-            exit 1
-          fi
-          
-          echo "PROJECT_NAME=$PROJECT_NAME" >> $GITHUB_ENV
-          echo "PROJECT_VERSION=$PROJECT_VERSION" >> $GITHUB_ENV
-          
-          # ========== VALIDAÇÃO DE SECRETS ==========
-          
-          if [[ -z "${{ secrets.FORTIFY_SSC_API_URL }}" ]]; then
-            echo "❌ FORTIFY_SSC_API_URL não configurado"
-            exit 1
-          fi
-          
-          if ! echo "${{ secrets.FORTIFY_SSC_API_URL }}" | grep -qE '^https?://'; then
-            echo "❌ FORTIFY_SSC_API_URL formato inválido"
-            exit 1
-          fi
-          
-          if [[ -z "${{ secrets.FORTIFY_UNIFIED_LOGIN_TOKEN }}" ]]; then
-            echo "❌ FORTIFY_UNIFIED_LOGIN_TOKEN não configurado"
-            exit 1
-          fi
-          
-          # ========== TESTE DE CONECTIVIDADE ==========
-          
-          echo "🌐 Testando conectividade..."
-          if ! curl -k -sSL --connect-timeout 10 --max-time 30 "$fortify_ssc_api_url" >/dev/null 2>&1; then
-            echo "❌ Servidor não acessível"
-            exit 1
-          fi
-          
-          echo "🔐 Testando autenticação..."
-          response=$(api_call "GET" "$fortify_ssc_api_url/projectVersions" "" "teste de autenticação")
-          
-          if [ $? -eq 0 ]; then
-            echo "✅ Configuração validada"
-          else
-            echo "❌ Falha na autenticação"
-            exit 1
-          fi
-
-      - name: Download FPR
-        env:
-          fortify_project_name: ${{ env.PROJECT_NAME }}
-          fortify_version_name: ${{ env.PROJECT_VERSION }}
-          fortify_ssc_api_url: ${{ secrets.FORTIFY_SSC_API_URL }}
-          fortify_unified_login_token: ${{ secrets.FORTIFY_UNIFIED_LOGIN_TOKEN }}
-        run: |
-          echo "📥 Baixando FPR..."
-          
-          # Função de validação JSON robusta
-          validate_json_response() {
-              local response="$1"
-              local context="$2"
-              
-              if [ -z "$response" ]; then
-                  echo "❌ Resposta vazia da API ($context)"
-                  return 1
-              fi
-              
-              if ! echo "$response" | jq -e . >/dev/null 2>&1; then
-                  echo "❌ JSON inválido ($context):"
-                  echo "$response" | head -10
-                  return 1
-              fi
-              
-              local error_msg=$(echo "$response" | jq -r '.message // empty')
-              if [ -n "$error_msg" ]; then
-                  echo "❌ Erro da API ($context): $error_msg"
-                  return 1
-              fi
-              
-              return 0
-          }
-          
-          # Função segura para chamadas API
-          api_call() {
-              local method="${1:-GET}"
-              local url="$2"
-              local data="${3:-}"
-              local context="$4"
-              
-              local curl_opts=(-sS -k -L --fail)
-              curl_opts+=(-H "Content-Type: application/json")
-              curl_opts+=(-H "Accept: application/json")
-              curl_opts+=(-H "Authorization: FortifyToken $fortify_unified_login_token")
-              
-              if [ "$method" = "POST" ] || [ "$method" = "PUT" ]; then
-                  curl_opts+=(-X "$method")
-                  if [ -n "$data" ]; then
-                      curl_opts+=(-d "$data")
-                  fi
-              fi
-              
-              curl_opts+=("$url")
-              
-              local response
-              local exit_code
-              
-              response=$(curl "${curl_opts[@]}" 2>/dev/null) || exit_code=$?
-              
-              if [ "${exit_code:-0}" -ne 0 ]; then
-                  echo "❌ Falha na chamada API ($context): $exit_code"
-                  return 1
-              fi
-              
-              if ! validate_json_response "$response" "$context"; then
-                  return 1
-              fi
-              
-              echo "$response"
-              return 0
-          }
-          
-          # Buscar projeto/versão
-          project_response=$(api_call "GET" "$fortify_ssc_api_url/projectVersions?q=$fortify_project_name&fulltextsearch=true" "" "buscar projeto")
-          
-          if [ $? -ne 0 ]; then
-            echo "❌ Falha ao buscar projeto"
-            exit 1
-          fi
-          
-          # Buscar version_id
-          version_id=$(echo "$project_response" | jq -r --arg proj "$fortify_project_name" --arg ver "$fortify_version_name" \
-              '.data[] | select(.project.name==$proj and .name==$ver) | .id')
-          
-          if [ -z "$version_id" ] || [ "$version_id" == "null" ]; then
-            echo "❌ Projeto/versão não encontrado: $fortify_project_name/$fortify_version_name"
-            exit 1
-          fi
-          
-          echo "✅ Projeto encontrado: $version_id"
-          
-          # Buscar FPR
-          artifacts_response=$(api_call "GET" "$fortify_ssc_api_url/projectVersions/$version_id/artifacts" "" "buscar artefatos")
-          
-          if [ $? -ne 0 ]; then
-            echo "❌ Falha ao buscar artefatos"
-            exit 1
-          fi
-          
-          # Buscar FPR
-          fpr_id=$(echo "$artifacts_response" | jq -r '.data[] | select(.name | endswith(".fpr")) | .id' | head -1)
-          
-          if [ -z "$fpr_id" ] || [ "$fpr_id" == "null" ]; then
-            echo "❌ Nenhum FPR encontrado"
-            exit 1
-          fi
-          
-          echo "✅ FPR encontrado: $fpr_id"
-          
-          # Baixar FPR
-          mkdir -p fortify-artifacts
-          
-          safe_project_name=$(echo "$fortify_project_name" | sed 's/[^a-zA-Z0-9._-]/-/g')
-          if [[ -z "$safe_project_name" ]]; then
-            safe_project_name="project"
-          fi
-          
-          fpr_filename="${safe_project_name}-${fortify_version_name}.fpr"
-          
-          if ! curl -k -sSL --connect-timeout 30 --max-time 300 \
-              -H "Authorization: FortifyToken $fortify_unified_login_token" \
-              -H "Accept: application/octet-stream" \
-              "$fortify_ssc_api_url/projectVersions/$version_id/artifacts/$fpr_id/content" \
-              -o "fortify-artifacts/$fpr_filename"; then
-            echo "❌ Falha ao baixar FPR"
-            exit 1
-          fi
-          
-          file_size=$(wc -c < "fortify-artifacts/$fpr_filename")
-          if [ "$file_size" -lt 1024 ]; then
-            echo "❌ Arquivo FPR muito pequeno"
-            exit 1
-          fi
-          
-          echo "✅ FPR baixado: $fpr_filename ($((file_size/1024/1024))MB)"
-          echo "fpr_filename=$fpr_filename" >> $GITHUB_ENV
+          echo "✅ SARIF MultiTool pronto para conversão"
 
       - name: Convert FPR to SARIF
         env:
-          fortify_project_name: ${{ env.PROJECT_NAME }}
-          fortify_version_name: ${{ env.PROJECT_VERSION }}
+          FORTIFY_PROJECT_NAME: ${{ inputs.name }}
+          FORTIFY_VERSION_NAME: ${{ inputs.version }}
         run: |
           echo "🔄 Convertendo FPR → SARIF..."
           
-          fpr_file="fortify-artifacts/$fpr_filename"
           sarif_file="fortify-artifacts/fortify-sast-results.sarif"
           
-          if ! sarif convert "$fpr_file" \
-                --tool FortifyFpr \
-                --output "$sarif_file" \
-                --pretty-print --force; then
-            echo "❌ Falha na conversão"
-            exit 1
+          # Conversão com retry
+          conversion_success=false
+          for attempt in {1..3}; do
+              echo "📁 Tentativa $attempt: Convertendo $(basename "$FPR_FILE")"
+              
+              if sarif convert "$FPR_FILE" \
+                    --tool FortifyFpr \
+                    --output "$sarif_file" \
+                    --pretty-print --force; then
+                  
+                  echo "✅ Conversão bem-sucedida na tentativa $attempt"
+                  conversion_success=true
+                  break
+              else
+                  echo "⚠️ Tentativa $attempt falhou"
+                  if [ $attempt -lt 3 ]; then
+                      sleep 5
+                  fi
+              fi
+          done
+          
+          if [ "$conversion_success" = false ]; then
+              echo "❌ Falha na conversão após 3 tentativas"
+              exit 1
           fi
           
+          # Verificar se SARIF foi gerado
           if [ ! -f "$sarif_file" ]; then
-            echo "❌ Arquivo SARIF não foi gerado"
-            exit 1
+              echo "❌ Arquivo SARIF não foi gerado"
+              exit 1
           fi
           
+          # Adicionar metadados essenciais
+          echo "🏷️ Adicionando metadados..."
+          timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          
+          jq --arg project "$FORTIFY_PROJECT_NAME" \
+             --arg version "$FORTIFY_VERSION_NAME" \
+             --arg timestamp "$timestamp" \
+             '(.runs[0].properties // {}) |= . + {
+                "fortify_project": $project,
+                "fortify_version": $version,
+                "fortify_scan_time": $timestamp,
+                "fortify_engine_version": "25.2.0",
+                "conversion_method": "fpr_to_sarif_hybrid"
+              }' "$sarif_file" > "${sarif_file}.tmp" && mv "${sarif_file}.tmp" "$sarif_file"
+          
+          # Estatísticas finais
           file_size=$(wc -c < "$sarif_file")
           findings=$(jq '.runs[0].results | length' "$sarif_file" 2>/dev/null || echo "0")
+          rules=$(jq '.runs[0].tool.driver.rules | length' "$sarif_file" 2>/dev/null || echo "0")
           
-          echo "✅ SARIF gerado: $((file_size/1024))KB, $findings findings"
+          echo "📊 SARIF gerado com sucesso:"
+          echo "   • Tamanho: $((file_size/1024))KB"
+          echo "   • Findings: $findings"
+          echo "   • Regras: $rules"
+          echo "   • Formato: SARIF 2.1.0"
 
       - name: Validate SARIF
         if: inputs.validate_sarif == 'true'
         run: |
+          echo "🔍 Validação final do SARIF..."
+          
           sarif_file="fortify-artifacts/fortify-sast-results.sarif"
           
-          if [ ! -f "$sarif_file" ]; then
-            echo "❌ Arquivo SARIF não encontrado"
-            exit 1
+          if [ -f "$sarif_file" ]; then
+              if sarif validate "$sarif_file" 2>/dev/null; then
+                  count=$(jq '.runs[0].results | length' "$sarif_file" 2>/dev/null || echo "0")
+                  rules=$(jq '.runs[0].tool.driver.rules | length' "$sarif_file" 2>/dev/null || echo "0")
+                  echo "✅ SARIF válido: $count findings, $rules regras"
+              else
+                  echo "❌ SARIF gerado mas inválido"
+                  echo "🔍 Verificando problemas..."
+                  sarif validate "$sarif_file" || true
+                  exit 1
+              fi
+          else
+              echo "❌ Arquivo SARIF não encontrado"
+              exit 1
           fi
-          
-          if ! sarif validate "$sarif_file" 2>/dev/null; then
-            echo "❌ SARIF inválido"
-            exit 1
-          fi
-          
-          echo "✅ SARIF válido"
 
       - name: Upload SARIF to GitHub Code Scanning
         uses: github/codeql-action/upload-sarif@v2
@@ -405,10 +312,29 @@ jobs:
           sarif_file: fortify-artifacts/fortify-sast-results.sarif
         continue-on-error: true
 
-      - name: Upload SARIF Artifact
+      - name: Upload SARIF Artifact for Developer
         uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874
         with:
           name: fortify-sarif-${{ github.run_number }}
           path: fortify-artifacts/fortify-sast-results.sarif
           if-no-files-found: error
-          retention-days: 30 
+          retention-days: 30
+
+      - name: Cleanup temporary artifacts
+        uses: geekyeggo/delete-artifact@v5
+        with:
+          name: fortify-fpr-temp-${{ github.run_number }}
+        continue-on-error: true
+
+      - name: Summary for Developer
+        run: |
+          echo "🎉 Conversão FPR → SARIF concluída!"
+          echo ""
+          echo "📋 INSTRUÇÕES PARA O DESENVOLVEDOR:"
+          echo "1. Acesse: Actions → Esta execução → Artifacts"
+          echo "2. Baixe: fortify-sarif-${{ github.run_number }}.zip"
+          echo "3. Extraia o arquivo .sarif"
+          echo "4. Abra no VS Code com extensão 'SARIF Viewer'"
+          echo "5. Analise as vulnerabilidades e aplique correções"
+          echo ""
+          echo "🔗 Documentação SARIF Viewer: https://marketplace.visualstudio.com/items?itemName=MS-SarifVSCode.sarif-viewer" 

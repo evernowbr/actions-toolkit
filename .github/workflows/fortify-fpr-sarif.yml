@@ -157,6 +157,13 @@ jobs:
                   return 1
               fi
               
+              # Verificar se a resposta contém dados válidos
+              local data_count=$(echo "$response" | jq -r '.data | length // 0' 2>/dev/null || echo "0")
+              if [[ "$data_count" == "null" ]]; then
+                  echo "⚠️ Resposta sem dados válidos ($context) - isso pode ser normal para projetos novos"
+                  return 0  # Não é erro para projetos novos
+              fi
+              
               return 0
           }
           
@@ -186,15 +193,19 @@ jobs:
                   local response
                   local exit_code
                   
+                  echo "🔍 Tentativa $attempt/$max_retries: $method $url"
                   response=$(curl "${curl_opts[@]}" 2>/dev/null) || exit_code=$?
                   
                   if [[ "${exit_code:-0}" -eq 0 ]] && validate_api_response "$response" "$context"; then
+                      echo "✅ API call bem-sucedida ($context)"
                       echo "$response"
                       return 0
                   else
-                      echo "⚠️ Tentativa $attempt/$max_retries falhou ($context)"
+                      echo "⚠️ Tentativa $attempt/$max_retries falhou ($context) - Exit: ${exit_code:-0}"
                       if [[ $attempt -lt $max_retries ]]; then
-                          sleep $((attempt * 2))  # Backoff exponencial
+                          local sleep_time=$((attempt * 2))
+                          echo "⏳ Aguardando ${sleep_time}s antes da próxima tentativa..."
+                          sleep $sleep_time
                       fi
                   fi
               done
@@ -247,9 +258,14 @@ jobs:
           
           # Verificar projeto/versão existente
           echo "🔍 Verificando projeto $PROJECT_NAME no SSC..."
+          echo "🔍 URL do SSC: $FORTIFY_SSC_API_URL"
+          
+          # URL encoding seguro para o nome do projeto
+          encoded_project_name=$(echo "$PROJECT_NAME" | sed 's/[^a-zA-Z0-9._-]/-/g')
+          echo "🔍 Nome do projeto codificado: $encoded_project_name"
           
           project_response=$(api_call_with_retry "GET" \
-              "$FORTIFY_SSC_API_URL/api/v1/projectVersions?q=$(echo "$PROJECT_NAME" | jq -sRr '@uri')&fulltextsearch=true" \
+              "$FORTIFY_SSC_API_URL/api/v1/projectVersions?q=$encoded_project_name&fulltextsearch=true" \
               "" "buscar projeto")
           
           if [[ $? -ne 0 ]]; then

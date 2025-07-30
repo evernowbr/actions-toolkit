@@ -139,112 +139,7 @@ jobs:
               exit 1
           fi
           
-          # ========== FUNÇÕES OTIMIZADAS ==========
-          
-          # Função robusta para validação de resposta API
-          validate_api_response() {
-              local response="$1"
-              local context="$2"
-              
-              if [[ -z "$response" ]]; then
-                  echo "❌ Resposta vazia da API ($context)"
-                  return 1
-              fi
-              
-              if ! echo "$response" | jq -e . >/dev/null 2>&1; then
-                  echo "❌ JSON inválido ($context):"
-                  echo "$response" | head -5
-                  return 1
-              fi
-              
-              echo "✅ Resposta válida ($context)"
-              return 0
-          }
-          
-          # Função segura para chamadas API com retry
-          api_call_with_retry() {
-              local method="${1:-GET}"
-              local url="$2"
-              local data="${3:-}"
-              local context="$4"
-              local max_retries="${5:-3}"
-              
-              echo "🔍 Iniciando API call: $method $url"
-              
-              for attempt in $(seq 1 $max_retries); do
-                  echo "🔍 Tentativa $attempt/$max_retries: $method $url"
-                  
-                  local curl_opts=(-sS -k -L --connect-timeout 30 --max-time 120)
-                  curl_opts+=(-H "Content-Type: application/json")
-                  curl_opts+=(-H "Accept: application/json")
-                  curl_opts+=(-H "Authorization: FortifyToken $FORTIFY_UNIFIED_LOGIN_TOKEN")
-                  
-                  if [[ "$method" == "POST" ]] || [[ "$method" == "PUT" ]]; then
-                      curl_opts+=(-X "$method")
-                      if [[ -n "$data" ]]; then
-                          curl_opts+=(-d "$data")
-                      fi
-                  fi
-                  
-                  curl_opts+=("$url")
-                  
-                  local response
-                  local exit_code
-                  
-                  response=$(curl "${curl_opts[@]}" 2>/dev/null) || exit_code=$?
-                  
-                  if [[ "${exit_code:-0}" -eq 0 ]] && validate_api_response "$response" "$context"; then
-                      echo "✅ API call bem-sucedida ($context)"
-                      echo "$response"
-                      return 0
-                  else
-                      echo "⚠️ Tentativa $attempt/$max_retries falhou ($context) - Exit: ${exit_code:-0}"
-                      if [[ $attempt -lt $max_retries ]]; then
-                          local sleep_time=$((attempt * 2))
-                          echo "⏳ Aguardando ${sleep_time}s antes da próxima tentativa..."
-                          sleep $sleep_time
-                      fi
-                  fi
-              done
-              
-              echo "❌ Falha na API após $max_retries tentativas ($context)"
-              return 1
-          }
-          
-          # Função para criar projeto com validação completa
-          create_project_version() {
-              local project_name="$1"
-              local version_name="$2"
-              
-              local payload=$(jq -nc \
-                  --arg name "$project_name" \
-                  --arg version "$version_name" \
-                  '{
-                      "project": {"name": $name},
-                      "issueTemplateId": "Prioritized-HighRisk-Project-Template",
-                      "name": $version,
-                      "customTagValuesAutoApply": true,
-                      "autoPredict": true,
-                      "predictionPolicy": "LAB Fortify Policy"
-                  }')
-              
-              local response
-              response=$(api_call_with_retry "POST" "$FORTIFY_SSC_API_URL/api/v1/projectVersions" "$payload" "criar projeto")
-              
-              if [[ $? -eq 0 ]]; then
-                  local project_id=$(echo "$response" | jq -r '.data.project.id')
-                  local version_id=$(echo "$response" | jq -r '.data.id')
-                  
-                  echo "✅ Projeto criado: $project_name (ID: $project_id)"
-                  echo "✅ Versão criada: $version_name (ID: $version_id)"
-                  echo "$version_id"
-                  return 0
-              else
-                  return 1
-              fi
-          }
-          
-          # ========== EXECUÇÃO PRINCIPAL OTIMIZADA ==========
+          # ========== EXECUÇÃO PRINCIPAL ==========
           
           echo '   ____            __   _  ___        ____ ___    ____ ______ '
           echo '  / __/___   ____ / /_ (_)/ _/__ __  / __// _ |  / __//_  __/ '
@@ -261,59 +156,92 @@ jobs:
           encoded_project_name=$(echo "$PROJECT_NAME" | sed 's/[^a-zA-Z0-9._-]/-/g')
           echo "🔍 Nome do projeto codificado: $encoded_project_name"
           
-          echo "🔍 Testando função api_call_with_retry..."
+
           
-          # Teste simples primeiro
-          test_response=$(curl -sS -k -L --connect-timeout 30 --max-time 120 \
-              -H "Accept: application/json" \
-              -H "Authorization: FortifyToken $FORTIFY_UNIFIED_LOGIN_TOKEN" \
+          # Teste simples primeiro - usando padrão do fortify-sast.yml
+          echo "🔍 Verificando projeto $PROJECT_NAME no SSC..."
+          project_response=$(curl -sS -k -X GET \
+              --header "Accept: application/json" \
+              --header "Authorization: FortifyToken $FORTIFY_UNIFIED_LOGIN_TOKEN" \
               "$FORTIFY_SSC_API_URL/api/v1/projectVersions?q=$encoded_project_name&fulltextsearch=true" 2>/dev/null)
           
-          if [[ $? -eq 0 ]]; then
-              echo "✅ Teste de conectividade bem-sucedido"
-              project_response="$test_response"
+          exit_code=$?
+          
+          # Validação baseada no fortify-sast.yml
+          if [[ "$exit_code" == "0" ]] || [[ "$exit_code" == "" ]]; then
+              responseCode=$(echo "$project_response" | jq -r '.responseCode // empty' 2>/dev/null || echo "")
+              if [[ "$responseCode" != "200" ]] && [[ "$responseCode" != "201" ]] && [[ -n "$responseCode" ]]; then
+                  echo "❌ Código de retorno diferente de 200: API retornou código $responseCode"
+                  echo "❌ Resposta da API: $project_response"
+                  exit 1
+              fi
           else
-              echo "❌ Falha no teste de conectividade"
-              exit 1
+              echo "❌ Comando retornou $exit_code"
+              echo "❌ Mensagem de erro: $project_response"  
+              exit $exit_code
           fi
           
           echo "✅ Consulta de projetos concluída"
           
-          # Buscar IDs com filtros seguros
-          project_id=$(echo "$project_response" | jq -r --arg proj "$PROJECT_NAME" \
-              '.data[] | select(.project.name==$proj) | .project.id' | head -1)
-          version_id=$(echo "$project_response" | jq -r --arg proj "$PROJECT_NAME" --arg ver "$VERSION_NAME" \
-              '.data[] | select(.project.name==$proj and .name==$ver) | .id' | head -1)
+          # Buscar IDs usando padrão do fortify-sast.yml
+          project_id=$(echo "$project_response" | jq -r '.data[] | select(.project.name=="'$PROJECT_NAME'") | .project.id' | head -1 | awk '{$1=$1};1')
+          version_id=$(echo "$project_response" | jq -r '.data[] | select(.project.name=="'$PROJECT_NAME'") | select(.name=="'$VERSION_NAME'") | .id' | awk '{$1=$1};1')
           
-          # Lógica de criação com validação
-          if [[ -n "$version_id" ]] && [[ "$version_id" != "null" ]]; then
-              echo "✅ Projeto e versão já existem (ID: $version_id)"
-          elif [[ -n "$project_id" ]] && [[ "$project_id" != "null" ]]; then
-              echo "📋 Projeto existe, criando versão..."
+          # Lógica de criação usando padrão do fortify-sast.yml
+          if [[ "$version_id" != "" ]]; then
+              # Já existe projeto e versão no SSC
+              echo "✅ O projeto $PROJECT_NAME já existe no SSC com ID $project_id."
+              echo "✅ A versão $VERSION_NAME já existe no SSC com ID $version_id."
+          elif [[ "$project_id" != "" ]]; then
+              # Já existe projeto (sem versão) no SSC
+              echo "✅ O projeto $PROJECT_NAME já existe no SSC com ID $project_id. Criando versão..."
+              
               # Criar versão para projeto existente
-              local version_payload=$(jq -nc \
-                  --arg project_name "$PROJECT_NAME" \
-                  --arg project_id "$project_id" \
-                  --arg version_name "$VERSION_NAME" \
-                  '{
-                      "project": {"name": $project_name, "id": $project_id},
-                      "issueTemplateId": "Prioritized-HighRisk-Project-Template",
-                      "name": $version_name
-                  }')
+              fortify_project_parameters='{"project":{"name":"'$PROJECT_NAME'","id":"'$project_id'"},"issueTemplateId":"Prioritized-HighRisk-Project-Template","name": "'$VERSION_NAME'"}'
+              response=$(curl -sS -k -X POST --header "Content-Type: application/json" --header "Accept: application/json" --header "Authorization: FortifyToken $FORTIFY_UNIFIED_LOGIN_TOKEN" "$FORTIFY_SSC_API_URL/api/v1/projectVersions" -d "$fortify_project_parameters")
+              exit_code=$?
               
-              local version_response
-              version_response=$(api_call_with_retry "POST" "$FORTIFY_SSC_API_URL/api/v1/projectVersions" "$version_payload" "criar versão")
-              
-              if [[ $? -eq 0 ]]; then
-                  version_id=$(echo "$version_response" | jq -r '.data.id')
-                  echo "✅ Versão criada: $VERSION_NAME (ID: $version_id)"
+              if [[ "$exit_code" == "0" ]] || [[ "$exit_code" == "" ]]; then
+                  responseCode=$(echo "$response" | jq -r '.responseCode // empty' 2>/dev/null || echo "")
+                  if [[ "$responseCode" != "200" ]] && [[ "$responseCode" != "201" ]] && [[ -n "$responseCode" ]]; then
+                      echo "❌ Código de retorno diferente de 200: API retornou código $responseCode"
+                      echo "❌ Resposta da API: $response"
+                      exit 1
+                  fi
               else
-                  echo "❌ Falha ao criar versão"
-                  exit 1
+                  echo "❌ Comando retornou $exit_code"
+                  echo "❌ Mensagem de erro: $response"  
+                  exit $exit_code
               fi
+              
+              version_id=$(echo "$response" | jq -r '.data.id')
+              echo "✅ Versão $VERSION_NAME criada com ID $version_id."
           else
-              echo "📋 Criando projeto e versão..."
-              version_id=$(create_project_version "$PROJECT_NAME" "$VERSION_NAME")
+              # Não tem projeto nem versão no SSC
+              echo "⚠️ O projeto $PROJECT_NAME ainda não existe no SSC. Criando projeto e versão..."
+              
+              # Cria um projeto e uma versão novos
+              fortify_project_parameters='{"project":{"name":"'$PROJECT_NAME'"},"issueTemplateId":"Prioritized-HighRisk-Project-Template","name":"'$VERSION_NAME'","customTagValuesAutoApply":true,"autoPredict":true,"predictionPolicy":"LAB Fortify Policy"}'
+              response=$(curl -sS -k -X POST --header "Content-Type: application/json" --header "Accept: application/json" --header "Authorization: FortifyToken $FORTIFY_UNIFIED_LOGIN_TOKEN" "$FORTIFY_SSC_API_URL/api/v1/projectVersions" -d "$fortify_project_parameters")
+              exit_code=$?
+              
+              if [[ "$exit_code" == "0" ]] || [[ "$exit_code" == "" ]]; then
+                  responseCode=$(echo "$response" | jq -r '.responseCode // empty' 2>/dev/null || echo "")
+                  if [[ "$responseCode" != "200" ]] && [[ "$responseCode" != "201" ]] && [[ -n "$responseCode" ]]; then
+                      echo "❌ Código de retorno diferente de 200: API retornou código $responseCode"
+                      echo "❌ Resposta da API: $response"
+                      exit 1
+                  fi
+              else
+                  echo "❌ Comando retornou $exit_code"
+                  echo "❌ Mensagem de erro: $response"  
+                  exit $exit_code
+              fi
+              
+              project_id=$(echo "$response" | jq -r '.data.project.id')
+              version_id=$(echo "$response" | jq -r '.data.id')
+              echo "✅ Projeto $PROJECT_NAME criado com ID $project_id."
+              echo "✅ Versão $VERSION_NAME criada com ID $version_id."
           fi
           
           if [[ -z "$version_id" ]] || [[ "$version_id" == "null" ]]; then
@@ -321,76 +249,55 @@ jobs:
               exit 1
           fi
           
-          # Configurar projeto (com as funções originais otimizadas)
+          # Configurar projeto usando padrão do fortify-sast.yml
           echo "⚙️ Configurando projeto..."
           
-          # Função para configurar projeto
-          fortify_configurar_projeto() {
-              local version_id="$1"
-              
-              local config_data=$(jq -nc \
-                  --arg version_id "$version_id" \
-                  --arg base_url "$FORTIFY_SSC_API_URL" \
-                  '{
-                      "requests": [
-                          {
-                              "uri": ($base_url + "/api/v1/projectVersions/" + $version_id + "/attributes"),
-                              "httpVerb": "PUT",
-                              "postData": [
-                                  {"values": [{"guid": "New"}], "attributeDefinitionId": 5},
-                                  {"values": [{"guid": "Internal"}], "attributeDefinitionId": 6},
-                                  {"values": [{"guid": "internalnetwork"}], "attributeDefinitionId": 7}
-                              ]
-                          },
-                          {
-                              "uri": ($base_url + "/api/v1/projectVersions/" + $version_id + "/authEntities"),
-                              "httpVerb": "PUT",
-                              "postData": []
-                          },
-                          {
-                              "uri": ($base_url + "/api/v1/projectVersions/" + $version_id + "?hideProgress=true"),
-                              "httpVerb": "PUT",
-                              "postData": {"committed": true}
-                          }
-                      ]
-                  }')
-              
-              local response
-              response=$(api_call_with_retry "POST" "$FORTIFY_SSC_API_URL/api/v1/bulk" "$config_data" "configurar projeto")
-              
-              if [[ $? -eq 0 ]]; then
-                  local success_count=$(echo "$response" | jq -r '.successCount')
-                  if [[ "$success_count" == "3" ]]; then
-                      echo "✅ Projeto configurado com sucesso"
-                  else
-                      echo "⚠️ Configuração parcial: $success_count/3 operações"
-                  fi
-              else
-                  echo "❌ Falha ao configurar projeto"
-                  return 1
+          # Configurar parâmetros adicionais do projeto
+          fortify_parametros='{"requests":[{"uri":"'$FORTIFY_SSC_API_URL'/api/v1/projectVersions/'$version_id'/attributes'","httpVerb":"PUT","postData":[{"values":[{"guid":"New"}],"attributeDefinitionId":5},{"values":[{"guid":"Internal"}],"attributeDefinitionId":6},{"values":[{"guid":"internalnetwork"}],"attributeDefinitionId":7}]},{"uri":"'$FORTIFY_SSC_API_URL'/api/v1/projectVersions/'$version_id'/authEntities'","httpVerb":"PUT","postData":[]},{"uri":"'$FORTIFY_SSC_API_URL'/api/v1/projectVersions/'$version_id'?hideProgress=true'","httpVerb":"PUT","postData":{"committed":true}}]}'
+          response=$(curl -sS -k -X POST --header "Content-Type: application/json" --header "Accept: application/json" --header "Authorization: FortifyToken $FORTIFY_UNIFIED_LOGIN_TOKEN" "$FORTIFY_SSC_API_URL/api/v1/bulk" -d "$fortify_parametros")
+          exit_code=$?
+          
+          if [[ "$exit_code" == "0" ]] || [[ "$exit_code" == "" ]]; then
+              responseCode=$(echo "$response" | jq -r '.responseCode // empty' 2>/dev/null || echo "")
+              if [[ "$responseCode" != "200" ]] && [[ "$responseCode" != "201" ]] && [[ -n "$responseCode" ]]; then
+                  echo "❌ Código de retorno diferente de 200: API retornou código $responseCode"
+                  echo "❌ Resposta da API: $response"
+                  exit 1
               fi
-          }
+          else
+              echo "❌ Comando retornou $exit_code"
+              echo "❌ Mensagem de erro: $response"  
+              exit $exit_code
+          fi
           
-          fortify_configurar_projeto "$version_id"
+          successCount=$(echo "$response" | jq -r '.successCount')
+          if [[ "$successCount" != "3" ]]; then
+              echo "❌ Parâmetros adicionais do projeto $PROJECT_NAME configurados sem sucesso."
+              echo "❌ Código de retorno diferente de 200: API retornou código $exit_code"
+              echo "❌ Resposta da API: $response"
+              exit 1
+          else
+              echo "✅ Parâmetros adicionais do projeto $PROJECT_NAME configurados com sucesso."
+          fi
           
-          # Configurar regras de processamento
-          fortify_regras_processamento() {
-              local version_id="$1"
-              
-              local rules_payload='[{"identifier": "com.fortify.manager.BLL.processingrules.BuildProjectProcessingRule","displayName": "Require approval if the Build Project is different between scans","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.FileCountProcessingRule","displayName": "Require approval if file count differs by more than 10%","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.LOCCountProcessingRule","displayName": "Require approval if line count differs by more than 10%","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.NewerEngineVersionProcessingRule","displayName": "Require approval if the engine version of a scan is newer than the engine version of the previous scan","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.RulePackVersionProcessingRule","displayName": "Require approval if the rulepacks used in the scan do not match the rulepacks used in the previous scan","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.WarningProcessingRule","displayName": "Require approval if result has analysis warnings","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.ExternalListVersionProcessingRule","displayName": "Check external metadata file versions in scan against versions on server.","displayable": true,"enabled": false}]'
-              
-              local response
-              response=$(api_call_with_retry "PUT" "$FORTIFY_SSC_API_URL/api/v1/projectVersions/$version_id/resultProcessingRules" "$rules_payload" "configurar regras")
-              
-              if [[ $? -eq 0 ]]; then
-                  echo "✅ Regras de processamento configuradas"
-              else
-                  echo "❌ Falha ao configurar regras de processamento"
-                  return 1
+          # Definir regras de processamento de resultados
+          response=$(curl -sS -k -X PUT --header "Content-Type: application/json" --header "Accept: application/json" --header "Authorization: FortifyToken $FORTIFY_UNIFIED_LOGIN_TOKEN" "$FORTIFY_SSC_API_URL/api/v1/projectVersions/$version_id/resultProcessingRules" -d '[{"identifier": "com.fortify.manager.BLL.processingrules.BuildProjectProcessingRule","displayName": "Require approval if the Build Project is different between scans","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.FileCountProcessingRule","displayName": "Require approval if file count differs by more than 10%","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.LOCCountProcessingRule","displayName": "Require approval if line count differs by more than 10%","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.NewerEngineVersionProcessingRule","displayName": "Require approval if the engine version of a scan is newer than the engine version of the previous scan","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.RulePackVersionProcessingRule","displayName": "Require approval if the rulepacks used in the scan do not match the rulepacks used in the previous scan","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.WarningProcessingRule","displayName": "Require approval if result has analysis warnings","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.ExternalListVersionProcessingRule","displayName": "Check external metadata file versions in scan against versions on server.","displayable": true,"enabled": false}]')
+          exit_code=$?
+          
+          if [[ "$exit_code" == "0" ]] || [[ "$exit_code" == "" ]]; then
+              responseCode=$(echo "$response" | jq -r '.responseCode // empty' 2>/dev/null || echo "")
+              if [[ "$responseCode" != "200" ]] && [[ "$responseCode" != "201" ]] && [[ -n "$responseCode" ]]; then
+                  echo "❌ Código de retorno diferente de 200: API retornou código $responseCode"
+                  echo "❌ Resposta da API: $response"
+                  exit 1
               fi
-          }
+          else
+              echo "❌ Comando retornou $exit_code"
+              echo "❌ Mensagem de erro: $response"  
+              exit $exit_code
+          fi
           
-          fortify_regras_processamento "$version_id"
+          echo "✅ Regras de processamento do projeto $PROJECT_NAME configuradas com sucesso."
           
           # Executar ScanCentral com validação
           echo "🔧 Executando ScanCentral..."

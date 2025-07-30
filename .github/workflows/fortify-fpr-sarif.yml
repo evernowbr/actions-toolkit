@@ -24,8 +24,8 @@ on:
       timeout_minutes:
         description: 'Timeout em minutos'
         required: false
-        default: '45'
-        type: string
+        default: 45
+        type: number
     secrets:
       FORTIFY_SSC_API_URL:
         required: true

@@ -1,5 +1,9 @@
 name: Fortify Complete FPR to SARIF
 
+permissions:
+  contents: read
+  actions: read
+
 on:
   workflow_call:
     inputs:
@@ -176,58 +180,45 @@ jobs:
           
 
           
-          # ========== DEBUG COMPLETO DA API ==========
-          echo "🔍 DEBUG: Verificando projeto $PROJECT_NAME no SSC..."
+          # ========== VERIFICAÇÃO DA API ==========
+          echo "🔍 Verificando conectividade com SSC..."
           
           # Teste de conectividade básica
-          echo "🔍 DEBUG: Testando conectividade básica..."
           basic_test=$(curl -sS -k -w "%{http_code}" -o /tmp/basic_response \
               --header "Accept: application/json" \
               --header "Authorization: FortifyToken $FORTIFY_UNIFIED_LOGIN_TOKEN" \
               "$FORTIFY_SSC_API_URL/api/v1/projectVersions" 2>/dev/null)
           
-          echo "🔍 DEBUG: HTTP Status Code: $basic_test"
-          if [[ -f /tmp/basic_response ]]; then
-              echo "🔍 DEBUG: Primeiros 200 chars da resposta:"
-              head -c 200 /tmp/basic_response | cat
-              echo ""
-          fi
+          http_code="${basic_test: -3}"
+          echo "🔍 Status Code: $http_code"
           
           # Verificar se a resposta é HTML (erro de autenticação)
           if [[ -f /tmp/basic_response ]] && grep -q "<html" /tmp/basic_response; then
               echo "❌ ERRO: API retornou HTML - Token pode estar inválido ou expirado"
-              echo "🔍 DEBUG: Resposta completa:"
-              cat /tmp/basic_response
               exit 1
           fi
           
-          # Teste específico do projeto com debug
-          echo "🔍 DEBUG: Fazendo consulta específica do projeto..."
+          # Consulta específica do projeto
+          echo "🔍 Consultando projeto no SSC..."
           project_response=$(curl -sS -k -w "%{http_code}" -o /tmp/project_response \
               --header "Accept: application/json" \
               --header "Authorization: FortifyToken $FORTIFY_UNIFIED_LOGIN_TOKEN" \
               "$FORTIFY_SSC_API_URL/api/v1/projectVersions?q=$encoded_project_name&fulltextsearch=true" 2>/dev/null)
           
           http_code="${project_response: -3}"
-          echo "🔍 DEBUG: HTTP Status Code da consulta: $http_code"
+          echo "🔍 Status Code da consulta: $http_code"
           
           if [[ -f /tmp/project_response ]]; then
-              echo "🔍 DEBUG: Primeiros 300 chars da resposta do projeto:"
-              head -c 300 /tmp/project_response | cat
-              echo ""
-              
               # Verificar se é JSON válido
               if jq -e . /tmp/project_response >/dev/null 2>&1; then
-                  echo "✅ DEBUG: Resposta é JSON válido"
+                  echo "✅ Resposta válida"
                   project_response=$(cat /tmp/project_response)
               else
-                  echo "❌ DEBUG: Resposta não é JSON válido"
-                  echo "🔍 DEBUG: Conteúdo completo:"
-                  cat /tmp/project_response
+                  echo "❌ Resposta inválida"
                   exit 1
               fi
           else
-              echo "❌ DEBUG: Nenhuma resposta recebida"
+              echo "❌ Nenhuma resposta recebida"
               exit 1
           fi
           
@@ -250,7 +241,7 @@ jobs:
               echo "✅ O projeto $PROJECT_NAME já existe no SSC com ID $project_id. Criando versão..."
               
               # Criar versão para projeto existente
-              echo "🔍 DEBUG: Criando versão para projeto existente..."
+              echo "🔍 Criando versão para projeto existente..."
               fortify_project_parameters='{"project":{"name":"'$PROJECT_NAME'","id":"'$project_id'"},"issueTemplateId":"Prioritized-HighRisk-Project-Template","name": "'$VERSION_NAME'"}'
               
               response=$(curl -sS -k -w "%{http_code}" -o /tmp/create_version_response \
@@ -261,26 +252,17 @@ jobs:
                   -d "$fortify_project_parameters" 2>/dev/null)
               
               http_code="${response: -3}"
-              echo "🔍 DEBUG: HTTP Status Code da criação: $http_code"
+              echo "🔍 Status Code: $http_code"
               
-              if [[ -f /tmp/create_version_response ]]; then
-                  echo "🔍 DEBUG: Resposta da criação de versão:"
-                  cat /tmp/create_version_response
-                  echo ""
-                  
-                  if [[ "$http_code" == "200" ]] || [[ "$http_code" == "201" ]]; then
-                      if jq -e . /tmp/create_version_response >/dev/null 2>&1; then
-                          response=$(cat /tmp/create_version_response)
-                      else
-                          echo "❌ ERRO: Resposta não é JSON válido"
-                          exit 1
-                      fi
+              if [[ -f /tmp/create_version_response ]] && [[ "$http_code" == "200" ]] || [[ "$http_code" == "201" ]]; then
+                  if jq -e . /tmp/create_version_response >/dev/null 2>&1; then
+                      response=$(cat /tmp/create_version_response)
                   else
-                      echo "❌ ERRO: Falha na criação de versão (HTTP $http_code)"
+                      echo "❌ Resposta inválida"
                       exit 1
                   fi
               else
-                  echo "❌ ERRO: Nenhuma resposta recebida"
+                  echo "❌ Falha na criação de versão"
                   exit 1
               fi
               
@@ -293,7 +275,7 @@ jobs:
               echo "⚠️ O projeto $PROJECT_NAME ainda não existe no SSC. Criando projeto e versão..."
               
               # Cria um projeto e uma versão novos
-              echo "🔍 DEBUG: Criando projeto e versão..."
+              echo "🔍 Criando projeto e versão..."
               fortify_project_parameters='{"project":{"name":"'$PROJECT_NAME'"},"issueTemplateId":"Prioritized-HighRisk-Project-Template","name":"'$VERSION_NAME'","customTagValuesAutoApply":true,"autoPredict":true,"predictionPolicy":"LAB Fortify Policy"}'
               
               response=$(curl -sS -k -w "%{http_code}" -o /tmp/create_project_response \
@@ -304,26 +286,17 @@ jobs:
                   -d "$fortify_project_parameters" 2>/dev/null)
               
               http_code="${response: -3}"
-              echo "🔍 DEBUG: HTTP Status Code da criação: $http_code"
+              echo "🔍 Status Code: $http_code"
               
-              if [[ -f /tmp/create_project_response ]]; then
-                  echo "🔍 DEBUG: Resposta da criação de projeto:"
-                  cat /tmp/create_project_response
-                  echo ""
-                  
-                  if [[ "$http_code" == "200" ]] || [[ "$http_code" == "201" ]]; then
-                      if jq -e . /tmp/create_project_response >/dev/null 2>&1; then
-                          response=$(cat /tmp/create_project_response)
-                      else
-                          echo "❌ ERRO: Resposta não é JSON válido"
-                          exit 1
-                      fi
+              if [[ -f /tmp/create_project_response ]] && [[ "$http_code" == "200" ]] || [[ "$http_code" == "201" ]]; then
+                  if jq -e . /tmp/create_project_response >/dev/null 2>&1; then
+                      response=$(cat /tmp/create_project_response)
                   else
-                      echo "❌ ERRO: Falha na criação de projeto (HTTP $http_code)"
+                      echo "❌ Resposta inválida"
                       exit 1
                   fi
               else
-                  echo "❌ ERRO: Nenhuma resposta recebida"
+                  echo "❌ Falha na criação de projeto"
                   exit 1
               fi
               

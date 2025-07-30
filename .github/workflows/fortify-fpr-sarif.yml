@@ -51,67 +51,6 @@ jobs:
           sudo apt-get install -y jq curl
           echo "✅ Dependências instaladas"
 
-      - name: Validate inputs
-        run: |
-          echo "🔍 Validando inputs..."
-          
-          if [[ -z "${{ inputs.name }}" ]]; then
-            echo "❌ Nome do projeto é obrigatório"
-            exit 1
-          fi
-          
-          if [[ -z "${{ inputs.version }}" ]]; then
-            echo "❌ Versão do projeto é obrigatória"
-            exit 1
-          fi
-          
-          # Sanitização mais robusta com fallback
-          PROJECT_NAME=$(echo "${{ inputs.name }}" | tr -d '\n\r\t' | sed 's/[^a-zA-Z0-9._-]//g' | head -c 100)
-          PROJECT_VERSION=$(echo "${{ inputs.version }}" | tr -d '\n\r\t' | sed 's/[^a-zA-Z0-9._-]//g' | head -c 50)
-          
-          # Se sanitização removeu tudo, usar valor original
-          if [[ -z "$PROJECT_NAME" ]]; then
-            PROJECT_NAME=$(echo "${{ inputs.name }}" | tr -d '\n\r\t' | head -c 100)
-            if [[ -z "$PROJECT_NAME" ]]; then
-              echo "❌ Nome do projeto inválido"
-              exit 1
-            fi
-          fi
-          
-          if [[ -z "$PROJECT_VERSION" ]]; then
-            PROJECT_VERSION=$(echo "${{ inputs.version }}" | tr -d '\n\r\t' | head -c 50)
-            if [[ -z "$PROJECT_VERSION" ]]; then
-              echo "❌ Versão do projeto inválida"
-              exit 1
-            fi
-          fi
-          
-          echo "PROJECT_NAME=$PROJECT_NAME" >> $GITHUB_ENV
-          echo "PROJECT_VERSION=$PROJECT_VERSION" >> $GITHUB_ENV
-
-      - name: Validate secrets
-        run: |
-          echo "🔐 Validando secrets..."
-          
-          # Validar URL de forma mais robusta
-          if [[ -z "${{ secrets.FORTIFY_SSC_API_URL }}" ]]; then
-            echo "❌ FORTIFY_SSC_API_URL não configurado"
-            exit 1
-          fi
-          
-          # Usar grep em vez de regex bash
-          if ! echo "${{ secrets.FORTIFY_SSC_API_URL }}" | grep -qE '^https?://'; then
-            echo "❌ FORTIFY_SSC_API_URL formato inválido"
-            exit 1
-          fi
-          
-          if [[ -z "${{ secrets.FORTIFY_UNIFIED_LOGIN_TOKEN }}" ]]; then
-            echo "❌ FORTIFY_UNIFIED_LOGIN_TOKEN não configurado"
-            exit 1
-          fi
-          
-          echo "✅ Secrets validados"
-
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v4
         with:
@@ -126,26 +65,156 @@ jobs:
             exit 1
           fi
           
-          # Adicionar ao PATH
           echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
-          
           echo "✅ SARIF MultiTool instalado"
 
-      - name: Test connectivity
+      - name: Validate and Setup
         env:
           fortify_ssc_api_url: ${{ secrets.FORTIFY_SSC_API_URL }}
           fortify_unified_login_token: ${{ secrets.FORTIFY_UNIFIED_LOGIN_TOKEN }}
         run: |
-          echo "🔍 Testando conectividade..."
+          echo "🔍 Validando configuração..."
           
-          if ! curl -k -sSL --connect-timeout 10 --max-time 30 \
-              -H "Authorization: FortifyToken $fortify_unified_login_token" \
-              "$fortify_ssc_api_url/api/v1/projectVersions" >/dev/null 2>&1; then
-            echo "❌ Falha na conectividade/autenticação"
+          # ========== FUNÇÕES UTILITÁRIAS ==========
+          
+          # Função de validação JSON robusta
+          validate_json_response() {
+              local response="$1"
+              local context="$2"
+              
+              if [ -z "$response" ]; then
+                  echo "❌ Resposta vazia da API ($context)"
+                  return 1
+              fi
+              
+              if ! echo "$response" | jq -e . >/dev/null 2>&1; then
+                  echo "❌ JSON inválido ($context):"
+                  echo "$response" | head -10
+                  return 1
+              fi
+              
+              local error_msg=$(echo "$response" | jq -r '.message // empty')
+              if [ -n "$error_msg" ]; then
+                  echo "❌ Erro da API ($context): $error_msg"
+                  return 1
+              fi
+              
+              return 0
+          }
+          
+          # Função segura para chamadas API
+          api_call() {
+              local method="${1:-GET}"
+              local url="$2"
+              local data="${3:-}"
+              local context="$4"
+              
+              local curl_opts=(-sS -k -L --fail)
+              curl_opts+=(-H "Content-Type: application/json")
+              curl_opts+=(-H "Accept: application/json")
+              curl_opts+=(-H "Authorization: FortifyToken $fortify_unified_login_token")
+              
+              if [ "$method" = "POST" ] || [ "$method" = "PUT" ]; then
+                  curl_opts+=(-X "$method")
+                  if [ -n "$data" ]; then
+                      curl_opts+=(-d "$data")
+                  fi
+              fi
+              
+              curl_opts+=("$url")
+              
+              local response
+              local exit_code
+              
+              response=$(curl "${curl_opts[@]}" 2>/dev/null) || exit_code=$?
+              
+              if [ "${exit_code:-0}" -ne 0 ]; then
+                  echo "❌ Falha na chamada API ($context): $exit_code"
+                  return 1
+              fi
+              
+              if ! validate_json_response "$response" "$context"; then
+                  return 1
+              fi
+              
+              echo "$response"
+              return 0
+          }
+          
+          # Função para sanitizar inputs
+          sanitize_input() {
+              local input="$1"
+              local max_length="${2:-100}"
+              
+              local sanitized=$(echo "$input" | tr -d '\n\r\t' | sed 's/[^a-zA-Z0-9._-]//g' | head -c "$max_length")
+              
+              if [[ -z "$sanitized" ]]; then
+                  sanitized=$(echo "$input" | tr -d '\n\r\t' | head -c "$max_length")
+                  if [[ -z "$sanitized" ]]; then
+                      return 1
+                  fi
+              fi
+              
+              echo "$sanitized"
+          }
+          
+          # ========== VALIDAÇÃO DE INPUTS ==========
+          
+          if [[ -z "${{ inputs.name }}" ]]; then
+            echo "❌ Nome do projeto é obrigatório"
             exit 1
           fi
           
-          echo "✅ Conectividade OK"
+          if [[ -z "${{ inputs.version }}" ]]; then
+            echo "❌ Versão do projeto é obrigatória"
+            exit 1
+          fi
+          
+          PROJECT_NAME=$(sanitize_input "${{ inputs.name }}" 100)
+          PROJECT_VERSION=$(sanitize_input "${{ inputs.version }}" 50)
+          
+          if [[ $? -ne 0 ]]; then
+            echo "❌ Falha na sanitização dos inputs"
+            exit 1
+          fi
+          
+          echo "PROJECT_NAME=$PROJECT_NAME" >> $GITHUB_ENV
+          echo "PROJECT_VERSION=$PROJECT_VERSION" >> $GITHUB_ENV
+          
+          # ========== VALIDAÇÃO DE SECRETS ==========
+          
+          if [[ -z "${{ secrets.FORTIFY_SSC_API_URL }}" ]]; then
+            echo "❌ FORTIFY_SSC_API_URL não configurado"
+            exit 1
+          fi
+          
+          if ! echo "${{ secrets.FORTIFY_SSC_API_URL }}" | grep -qE '^https?://'; then
+            echo "❌ FORTIFY_SSC_API_URL formato inválido"
+            exit 1
+          fi
+          
+          if [[ -z "${{ secrets.FORTIFY_UNIFIED_LOGIN_TOKEN }}" ]]; then
+            echo "❌ FORTIFY_UNIFIED_LOGIN_TOKEN não configurado"
+            exit 1
+          fi
+          
+          # ========== TESTE DE CONECTIVIDADE ==========
+          
+          echo "🌐 Testando conectividade..."
+          if ! curl -k -sSL --connect-timeout 10 --max-time 30 "$fortify_ssc_api_url" >/dev/null 2>&1; then
+            echo "❌ Servidor não acessível"
+            exit 1
+          fi
+          
+          echo "🔐 Testando autenticação..."
+          response=$(api_call "GET" "$fortify_ssc_api_url/projectVersions" "" "teste de autenticação")
+          
+          if [ $? -eq 0 ]; then
+            echo "✅ Configuração validada"
+          else
+            echo "❌ Falha na autenticação"
+            exit 1
+          fi
 
       - name: Download FPR
         env:
@@ -156,23 +225,79 @@ jobs:
         run: |
           echo "📥 Baixando FPR..."
           
+          # Função de validação JSON robusta
+          validate_json_response() {
+              local response="$1"
+              local context="$2"
+              
+              if [ -z "$response" ]; then
+                  echo "❌ Resposta vazia da API ($context)"
+                  return 1
+              fi
+              
+              if ! echo "$response" | jq -e . >/dev/null 2>&1; then
+                  echo "❌ JSON inválido ($context):"
+                  echo "$response" | head -10
+                  return 1
+              fi
+              
+              local error_msg=$(echo "$response" | jq -r '.message // empty')
+              if [ -n "$error_msg" ]; then
+                  echo "❌ Erro da API ($context): $error_msg"
+                  return 1
+              fi
+              
+              return 0
+          }
+          
+          # Função segura para chamadas API
+          api_call() {
+              local method="${1:-GET}"
+              local url="$2"
+              local data="${3:-}"
+              local context="$4"
+              
+              local curl_opts=(-sS -k -L --fail)
+              curl_opts+=(-H "Content-Type: application/json")
+              curl_opts+=(-H "Accept: application/json")
+              curl_opts+=(-H "Authorization: FortifyToken $fortify_unified_login_token")
+              
+              if [ "$method" = "POST" ] || [ "$method" = "PUT" ]; then
+                  curl_opts+=(-X "$method")
+                  if [ -n "$data" ]; then
+                      curl_opts+=(-d "$data")
+                  fi
+              fi
+              
+              curl_opts+=("$url")
+              
+              local response
+              local exit_code
+              
+              response=$(curl "${curl_opts[@]}" 2>/dev/null) || exit_code=$?
+              
+              if [ "${exit_code:-0}" -ne 0 ]; then
+                  echo "❌ Falha na chamada API ($context): $exit_code"
+                  return 1
+              fi
+              
+              if ! validate_json_response "$response" "$context"; then
+                  return 1
+              fi
+              
+              echo "$response"
+              return 0
+          }
+          
           # Buscar projeto/versão
-          project_response=$(curl -k -sSL --connect-timeout 10 --max-time 30 \
-              -H "Authorization: FortifyToken $fortify_unified_login_token" \
-              "$fortify_ssc_api_url/api/v1/projectVersions?q=$fortify_project_name&fulltextsearch=true")
+          project_response=$(api_call "GET" "$fortify_ssc_api_url/projectVersions?q=$fortify_project_name&fulltextsearch=true" "" "buscar projeto")
           
           if [ $? -ne 0 ]; then
             echo "❌ Falha ao buscar projeto"
             exit 1
           fi
           
-          # Validar se resposta é JSON válido
-          if ! echo "$project_response" | jq -e . >/dev/null 2>&1; then
-            echo "❌ Resposta inválida da API"
-            exit 1
-          fi
-          
-          # Buscar version_id com validação
+          # Buscar version_id
           version_id=$(echo "$project_response" | jq -r --arg proj "$fortify_project_name" --arg ver "$fortify_version_name" \
               '.data[] | select(.project.name==$proj and .name==$ver) | .id')
           
@@ -184,22 +309,14 @@ jobs:
           echo "✅ Projeto encontrado: $version_id"
           
           # Buscar FPR
-          artifacts_response=$(curl -k -sSL --connect-timeout 10 --max-time 30 \
-              -H "Authorization: FortifyToken $fortify_unified_login_token" \
-              "$fortify_ssc_api_url/api/v1/projectVersions/$version_id/artifacts")
+          artifacts_response=$(api_call "GET" "$fortify_ssc_api_url/projectVersions/$version_id/artifacts" "" "buscar artefatos")
           
           if [ $? -ne 0 ]; then
             echo "❌ Falha ao buscar artefatos"
             exit 1
           fi
           
-          # Validar se resposta é JSON válido
-          if ! echo "$artifacts_response" | jq -e . >/dev/null 2>&1; then
-            echo "❌ Resposta inválida da API de artefatos"
-            exit 1
-          fi
-          
-          # Buscar FPR com validação
+          # Buscar FPR
           fpr_id=$(echo "$artifacts_response" | jq -r '.data[] | select(.name | endswith(".fpr")) | .id' | head -1)
           
           if [ -z "$fpr_id" ] || [ "$fpr_id" == "null" ]; then
@@ -212,7 +329,6 @@ jobs:
           # Baixar FPR
           mkdir -p fortify-artifacts
           
-          # Nome de arquivo mais seguro com validação
           safe_project_name=$(echo "$fortify_project_name" | sed 's/[^a-zA-Z0-9._-]/-/g')
           if [[ -z "$safe_project_name" ]]; then
             safe_project_name="project"
@@ -223,7 +339,7 @@ jobs:
           if ! curl -k -sSL --connect-timeout 30 --max-time 300 \
               -H "Authorization: FortifyToken $fortify_unified_login_token" \
               -H "Accept: application/octet-stream" \
-              "$fortify_ssc_api_url/api/v1/projectVersions/$version_id/artifacts/$fpr_id/content" \
+              "$fortify_ssc_api_url/projectVersions/$version_id/artifacts/$fpr_id/content" \
               -o "fortify-artifacts/$fpr_filename"; then
             echo "❌ Falha ao baixar FPR"
             exit 1
@@ -262,7 +378,6 @@ jobs:
           fi
           
           file_size=$(wc -c < "$sarif_file")
-          # Contagem de findings mais robusta
           findings=$(jq '.runs[0].results | length' "$sarif_file" 2>/dev/null || echo "0")
           
           echo "✅ SARIF gerado: $((file_size/1024))KB, $findings findings"

@@ -130,14 +130,32 @@ jobs:
           # Configurar environment
           export PATH="$PATH:/opt/Fortify_ScanCentral_Client_25.2.0_x64/bin"
           
-          # Teste simples de conectividade
-          echo "🔍 Testando conectividade com o SSC..."
-          if curl -sS -k --connect-timeout 10 "$FORTIFY_SSC_API_URL/api/v1/projectVersions" >/dev/null 2>&1; then
-              echo "✅ Conectividade com SSC OK"
-          else
-              echo "❌ Falha na conectividade com SSC"
+          # ========== VALIDAÇÃO DE TOKEN E CONECTIVIDADE ==========
+          echo "🔍 Validando token e conectividade..."
+          
+          # Teste de autenticação
+          auth_test=$(curl -sS -k -w "%{http_code}" -o /tmp/auth_response \
+              --header "Accept: application/json" \
+              --header "Authorization: FortifyToken $FORTIFY_UNIFIED_LOGIN_TOKEN" \
+              "$FORTIFY_SSC_API_URL/api/v1/projectVersions" 2>/dev/null)
+          
+          auth_code="${auth_test: -3}"
+          echo "🔍 DEBUG: Código de autenticação: $auth_code"
+          
+          if [[ "$auth_code" == "401" ]] || [[ "$auth_code" == "403" ]]; then
+              echo "❌ ERRO: Token de autenticação inválido ou expirado"
+              echo "🔍 DEBUG: Resposta de autenticação:"
+              cat /tmp/auth_response
               exit 1
+          elif [[ "$auth_code" == "200" ]] || [[ "$auth_code" == "201" ]]; then
+              echo "✅ Token de autenticação válido"
+          else
+              echo "⚠️ Código de resposta inesperado: $auth_code"
+              echo "🔍 DEBUG: Resposta:"
+              cat /tmp/auth_response
           fi
+          
+          rm -f /tmp/auth_response
           
           # ========== EXECUÇÃO PRINCIPAL ==========
           
@@ -158,28 +176,63 @@ jobs:
           
 
           
-          # Teste simples primeiro - usando padrão do fortify-sast.yml
-          echo "🔍 Verificando projeto $PROJECT_NAME no SSC..."
-          project_response=$(curl -sS -k -X GET \
+          # ========== DEBUG COMPLETO DA API ==========
+          echo "🔍 DEBUG: Verificando projeto $PROJECT_NAME no SSC..."
+          
+          # Teste de conectividade básica
+          echo "🔍 DEBUG: Testando conectividade básica..."
+          basic_test=$(curl -sS -k -w "%{http_code}" -o /tmp/basic_response \
+              --header "Accept: application/json" \
+              --header "Authorization: FortifyToken $FORTIFY_UNIFIED_LOGIN_TOKEN" \
+              "$FORTIFY_SSC_API_URL/api/v1/projectVersions" 2>/dev/null)
+          
+          echo "🔍 DEBUG: HTTP Status Code: $basic_test"
+          if [[ -f /tmp/basic_response ]]; then
+              echo "🔍 DEBUG: Primeiros 200 chars da resposta:"
+              head -c 200 /tmp/basic_response | cat
+              echo ""
+          fi
+          
+          # Verificar se a resposta é HTML (erro de autenticação)
+          if [[ -f /tmp/basic_response ]] && grep -q "<html" /tmp/basic_response; then
+              echo "❌ ERRO: API retornou HTML - Token pode estar inválido ou expirado"
+              echo "🔍 DEBUG: Resposta completa:"
+              cat /tmp/basic_response
+              exit 1
+          fi
+          
+          # Teste específico do projeto com debug
+          echo "🔍 DEBUG: Fazendo consulta específica do projeto..."
+          project_response=$(curl -sS -k -w "%{http_code}" -o /tmp/project_response \
               --header "Accept: application/json" \
               --header "Authorization: FortifyToken $FORTIFY_UNIFIED_LOGIN_TOKEN" \
               "$FORTIFY_SSC_API_URL/api/v1/projectVersions?q=$encoded_project_name&fulltextsearch=true" 2>/dev/null)
           
-          exit_code=$?
+          http_code="${project_response: -3}"
+          echo "🔍 DEBUG: HTTP Status Code da consulta: $http_code"
           
-          # Validação baseada no fortify-sast.yml
-          if [[ "$exit_code" == "0" ]] || [[ "$exit_code" == "" ]]; then
-              responseCode=$(echo "$project_response" | jq -r '.responseCode // empty' 2>/dev/null || echo "")
-              if [[ "$responseCode" != "200" ]] && [[ "$responseCode" != "201" ]] && [[ -n "$responseCode" ]]; then
-                  echo "❌ Código de retorno diferente de 200: API retornou código $responseCode"
-                  echo "❌ Resposta da API: $project_response"
+          if [[ -f /tmp/project_response ]]; then
+              echo "🔍 DEBUG: Primeiros 300 chars da resposta do projeto:"
+              head -c 300 /tmp/project_response | cat
+              echo ""
+              
+              # Verificar se é JSON válido
+              if jq -e . /tmp/project_response >/dev/null 2>&1; then
+                  echo "✅ DEBUG: Resposta é JSON válido"
+                  project_response=$(cat /tmp/project_response)
+              else
+                  echo "❌ DEBUG: Resposta não é JSON válido"
+                  echo "🔍 DEBUG: Conteúdo completo:"
+                  cat /tmp/project_response
                   exit 1
               fi
           else
-              echo "❌ Comando retornou $exit_code"
-              echo "❌ Mensagem de erro: $project_response"  
-              exit $exit_code
+              echo "❌ DEBUG: Nenhuma resposta recebida"
+              exit 1
           fi
+          
+          # Limpar arquivos temporários
+          rm -f /tmp/basic_response /tmp/project_response
           
           echo "✅ Consulta de projetos concluída"
           
@@ -197,22 +250,41 @@ jobs:
               echo "✅ O projeto $PROJECT_NAME já existe no SSC com ID $project_id. Criando versão..."
               
               # Criar versão para projeto existente
+              echo "🔍 DEBUG: Criando versão para projeto existente..."
               fortify_project_parameters='{"project":{"name":"'$PROJECT_NAME'","id":"'$project_id'"},"issueTemplateId":"Prioritized-HighRisk-Project-Template","name": "'$VERSION_NAME'"}'
-              response=$(curl -sS -k -X POST --header "Content-Type: application/json" --header "Accept: application/json" --header "Authorization: FortifyToken $FORTIFY_UNIFIED_LOGIN_TOKEN" "$FORTIFY_SSC_API_URL/api/v1/projectVersions" -d "$fortify_project_parameters")
-              exit_code=$?
               
-              if [[ "$exit_code" == "0" ]] || [[ "$exit_code" == "" ]]; then
-                  responseCode=$(echo "$response" | jq -r '.responseCode // empty' 2>/dev/null || echo "")
-                  if [[ "$responseCode" != "200" ]] && [[ "$responseCode" != "201" ]] && [[ -n "$responseCode" ]]; then
-                      echo "❌ Código de retorno diferente de 200: API retornou código $responseCode"
-                      echo "❌ Resposta da API: $response"
+              response=$(curl -sS -k -w "%{http_code}" -o /tmp/create_version_response \
+                  --header "Content-Type: application/json" \
+                  --header "Accept: application/json" \
+                  --header "Authorization: FortifyToken $FORTIFY_UNIFIED_LOGIN_TOKEN" \
+                  "$FORTIFY_SSC_API_URL/api/v1/projectVersions" \
+                  -d "$fortify_project_parameters" 2>/dev/null)
+              
+              http_code="${response: -3}"
+              echo "🔍 DEBUG: HTTP Status Code da criação: $http_code"
+              
+              if [[ -f /tmp/create_version_response ]]; then
+                  echo "🔍 DEBUG: Resposta da criação de versão:"
+                  cat /tmp/create_version_response
+                  echo ""
+                  
+                  if [[ "$http_code" == "200" ]] || [[ "$http_code" == "201" ]]; then
+                      if jq -e . /tmp/create_version_response >/dev/null 2>&1; then
+                          response=$(cat /tmp/create_version_response)
+                      else
+                          echo "❌ ERRO: Resposta não é JSON válido"
+                          exit 1
+                      fi
+                  else
+                      echo "❌ ERRO: Falha na criação de versão (HTTP $http_code)"
                       exit 1
                   fi
               else
-                  echo "❌ Comando retornou $exit_code"
-                  echo "❌ Mensagem de erro: $response"  
-                  exit $exit_code
+                  echo "❌ ERRO: Nenhuma resposta recebida"
+                  exit 1
               fi
+              
+              rm -f /tmp/create_version_response
               
               version_id=$(echo "$response" | jq -r '.data.id')
               echo "✅ Versão $VERSION_NAME criada com ID $version_id."
@@ -221,22 +293,41 @@ jobs:
               echo "⚠️ O projeto $PROJECT_NAME ainda não existe no SSC. Criando projeto e versão..."
               
               # Cria um projeto e uma versão novos
+              echo "🔍 DEBUG: Criando projeto e versão..."
               fortify_project_parameters='{"project":{"name":"'$PROJECT_NAME'"},"issueTemplateId":"Prioritized-HighRisk-Project-Template","name":"'$VERSION_NAME'","customTagValuesAutoApply":true,"autoPredict":true,"predictionPolicy":"LAB Fortify Policy"}'
-              response=$(curl -sS -k -X POST --header "Content-Type: application/json" --header "Accept: application/json" --header "Authorization: FortifyToken $FORTIFY_UNIFIED_LOGIN_TOKEN" "$FORTIFY_SSC_API_URL/api/v1/projectVersions" -d "$fortify_project_parameters")
-              exit_code=$?
               
-              if [[ "$exit_code" == "0" ]] || [[ "$exit_code" == "" ]]; then
-                  responseCode=$(echo "$response" | jq -r '.responseCode // empty' 2>/dev/null || echo "")
-                  if [[ "$responseCode" != "200" ]] && [[ "$responseCode" != "201" ]] && [[ -n "$responseCode" ]]; then
-                      echo "❌ Código de retorno diferente de 200: API retornou código $responseCode"
-                      echo "❌ Resposta da API: $response"
+              response=$(curl -sS -k -w "%{http_code}" -o /tmp/create_project_response \
+                  --header "Content-Type: application/json" \
+                  --header "Accept: application/json" \
+                  --header "Authorization: FortifyToken $FORTIFY_UNIFIED_LOGIN_TOKEN" \
+                  "$FORTIFY_SSC_API_URL/api/v1/projectVersions" \
+                  -d "$fortify_project_parameters" 2>/dev/null)
+              
+              http_code="${response: -3}"
+              echo "🔍 DEBUG: HTTP Status Code da criação: $http_code"
+              
+              if [[ -f /tmp/create_project_response ]]; then
+                  echo "🔍 DEBUG: Resposta da criação de projeto:"
+                  cat /tmp/create_project_response
+                  echo ""
+                  
+                  if [[ "$http_code" == "200" ]] || [[ "$http_code" == "201" ]]; then
+                      if jq -e . /tmp/create_project_response >/dev/null 2>&1; then
+                          response=$(cat /tmp/create_project_response)
+                      else
+                          echo "❌ ERRO: Resposta não é JSON válido"
+                          exit 1
+                      fi
+                  else
+                      echo "❌ ERRO: Falha na criação de projeto (HTTP $http_code)"
                       exit 1
                   fi
               else
-                  echo "❌ Comando retornou $exit_code"
-                  echo "❌ Mensagem de erro: $response"  
-                  exit $exit_code
+                  echo "❌ ERRO: Nenhuma resposta recebida"
+                  exit 1
               fi
+              
+              rm -f /tmp/create_project_response
               
               project_id=$(echo "$response" | jq -r '.data.project.id')
               version_id=$(echo "$response" | jq -r '.data.id')

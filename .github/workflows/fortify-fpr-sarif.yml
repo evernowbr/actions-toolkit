@@ -60,7 +60,23 @@ jobs:
           for cmd in jq curl awk sed; do
             command -v "$cmd" >/dev/null 2>&1 || { echo "❌ $cmd não encontrado"; exit 1; }
           done
-          command -v scancentral >/dev/null 2>&1 || exit 1
+          
+          echo "🔍 Verificando scancentral..."
+          if command -v scancentral >/dev/null 2>&1; then
+            echo "✅ scancentral encontrado em PATH"
+          elif [ -f "/opt/Fortify_ScanCentral_Client_25.2.0_x64/bin/scancentral" ]; then
+            echo "✅ scancentral encontrado em /opt/Fortify_ScanCentral_Client_25.2.0_x64/bin/"
+            export PATH="/opt/Fortify_ScanCentral_Client_25.2.0_x64/bin:$PATH"
+          else
+            echo "❌ scancentral não encontrado"
+            echo "📋 Locais verificados:"
+            echo "   - PATH padrão"
+            echo "   - /opt/Fortify_ScanCentral_Client_25.2.0_x64/bin/"
+            echo "   - /usr/local/bin/"
+            echo "   - /usr/bin/"
+            echo "🔧 Instale o Fortify ScanCentral Client ou configure o PATH"
+            exit 1
+          fi
 
       - name: Execute Fortify Scan
         env:
@@ -72,6 +88,19 @@ jobs:
           fortify_controller_token: ${{ secrets.FORTIFY_CONTROLLER_TOKEN }}
 
         run: |
+          echo "🔧 Configurando Fortify ScanCentral Client..."
+          export PATH="/opt/Fortify_ScanCentral_Client_25.2.0_x64/bin:$PATH"
+          echo "export PATH=\$PATH:/opt/Fortify_ScanCentral_Client_25.2.0_x64/bin" >> /home/github-runner/.bashrc
+          source ~/.bashrc
+          
+          echo "🔍 Verificando scancentral após configuração..."
+          if ! command -v scancentral >/dev/null 2>&1; then
+            echo "❌ scancentral ainda não encontrado após configuração do PATH"
+            echo "📋 PATH atual: $PATH"
+            exit 1
+          fi
+          echo "✅ scancentral encontrado e configurado"
+          
           fortify_verificar_resposta_api() {
               if [[ "$exit_code" == "0" ]] || [[ "$exit_code" == "" ]]; then
                   responseCode=$(echo "$response" | jq '.responseCode')

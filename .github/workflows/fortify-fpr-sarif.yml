@@ -113,34 +113,174 @@ jobs:
           echo "::notice title=API Setup::Configuring Fortify SSC API connection"
           echo "::notice title=API Setup::SSC URL: $fortify_ssc_api_url"
           
+          # Validação das variáveis de ambiente
+          echo "::notice title=Environment Validation::Validating required environment variables"
+          
+          if [[ -z "$fortify_ssc_api_url" ]]; then
+              echo "::error title=Configuration Error::FORTIFY_SSC_API_URL is not set"
+              echo "❌ FORTIFY_SSC_API_URL não está configurado"
+              exit 1
+          fi
+          
+          if [[ -z "$fortify_unified_login_token" ]]; then
+              echo "::error title=Configuration Error::FORTIFY_UNIFIED_LOGIN_TOKEN is not set"
+              echo "❌ FORTIFY_UNIFIED_LOGIN_TOKEN não está configurado"
+              exit 1
+          fi
+          
+          # Validação do formato da URL
+          if [[ ! "$fortify_ssc_api_url" =~ ^https?:// ]]; then
+              echo "::error title=Configuration Error::FORTIFY_SSC_API_URL must be a valid URL starting with http:// or https://"
+              echo "❌ FORTIFY_SSC_API_URL deve ser uma URL válida: $fortify_ssc_api_url"
+              exit 1
+          fi
+          
+          # Validação do formato do token (deve ter pelo menos 32 caracteres)
+          if [[ ${#fortify_unified_login_token} -lt 32 ]]; then
+              echo "::error title=Configuration Error::FORTIFY_UNIFIED_LOGIN_TOKEN appears to be invalid (too short)"
+              echo "❌ FORTIFY_UNIFIED_LOGIN_TOKEN parece ser inválido (muito curto)"
+              exit 1
+          fi
+          
+          echo "::notice title=Environment Validation::All environment variables are properly configured"
+          
+          # Teste de conectividade básica
+          echo "::notice title=Connectivity Test::Testing basic connectivity to Fortify SSC"
+          echo "🌐 Testando conectividade básica com o Fortify SSC..."
+          
+          # Extrair hostname da URL para teste de conectividade
+          ssc_host=$(echo "$fortify_ssc_api_url" | sed -E 's|^https?://([^/]+).*|\1|')
+          
+          if ! ping -c 1 -W 5 "$ssc_host" >/dev/null 2>&1; then
+              echo "::warning title=Connectivity Warning::Cannot ping $ssc_host, but continuing with HTTP test"
+              echo "⚠️  Não foi possível fazer ping para $ssc_host, mas continuando com teste HTTP"
+          fi
+          
+          # Teste HTTP básico
+          http_test_response=$(curl -sS -k -I --connect-timeout 10 --max-time 30 "$fortify_ssc_api_url" 2>&1)
+          http_test_exit_code=$?
+          
+          if [[ "$http_test_exit_code" != "0" ]]; then
+              echo "::error title=Connectivity Failed::Cannot reach Fortify SSC server"
+              echo "❌ Não foi possível conectar ao servidor Fortify SSC"
+              echo "🔍 Verifique:"
+              echo "   - URL do servidor está correta: $fortify_ssc_api_url"
+              echo "   - Servidor está online e acessível"
+              echo "   - Rede permite conexão HTTP/HTTPS"
+              echo "   - Firewall não está bloqueando a conexão"
+              exit 1
+          fi
+          
+          echo "::notice title=Connectivity Success::Successfully connected to Fortify SSC server"
+          
+          # Validação prévia da autenticação
+          echo "::notice title=Authentication Test::Testing Fortify SSC authentication"
+          echo "🔐 Testando autenticação com o Fortify SSC..."
+          
+          auth_test_response=$(curl -sS -k -X GET --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/currentUser" 2>&1)
+          auth_test_exit_code=$?
+          
+          if [[ "$auth_test_exit_code" != "0" ]]; then
+              echo "::error title=Authentication Failed::Failed to connect to Fortify SSC API"
+              echo "❌ Erro de conexão: $auth_test_response"
+              echo "🔍 Verifique:"
+              echo "   - FORTIFY_SSC_API_URL está correto"
+              echo "   - Servidor SSC está acessível"
+              echo "   - Rede permite conexão"
+              exit 1
+          fi
+          
+          if ! echo "$auth_test_response" | jq -e . >/dev/null 2>&1; then
+              echo "::error title=Authentication Failed::Invalid JSON response from authentication test"
+              echo "❌ Resposta inválida: $auth_test_response"
+              exit 1
+          fi
+          
+          auth_response_code=$(echo "$auth_test_response" | jq -r '.responseCode // empty')
+          if [[ -n "$auth_response_code" ]] && [[ "$auth_response_code" != "200" ]]; then
+              auth_error_message=$(echo "$auth_test_response" | jq -r '.message // "Unknown authentication error"')
+              echo "::error title=Authentication Failed::HTTP $auth_response_code - $auth_error_message"
+              echo "❌ Falha na autenticação: $auth_error_message"
+              echo "🔍 Verifique:"
+              echo "   - FORTIFY_UNIFIED_LOGIN_TOKEN está válido e não expirou"
+              echo "   - Token tem permissões adequadas"
+              echo "   - Formato do token está correto"
+              exit 1
+          fi
+          
+          user_info=$(echo "$auth_test_response" | jq -r '.data.userName // "Unknown"')
+          echo "::notice title=Authentication Success::Successfully authenticated as user: $user_info"
+          
           fortify_verificar_resposta_api() {
               local response="$1"
               local exit_code="$2"
+              local operation="$3"
               
               if [[ -z "$response" ]]; then
                   echo "::error title=API Error::Empty response from Fortify SSC API"
+                  echo "❌ Resposta vazia da API do Fortify SSC"
+                  if [[ -n "$operation" ]]; then
+                      echo "🔍 Operação que falhou: $operation"
+                  fi
                   exit 1
               fi
               
               if ! echo "$response" | jq -e . >/dev/null 2>&1; then
                   echo "::error title=API Error::Invalid JSON response from Fortify SSC API"
-                  echo "Response: $response"
+                  echo "❌ Resposta JSON inválida da API do Fortify SSC"
+                  echo "📄 Resposta recebida: $response"
+                  if [[ -n "$operation" ]]; then
+                      echo "🔍 Operação que falhou: $operation"
+                  fi
                   exit 1
               fi
               
               local responseCode=$(echo "$response" | jq -r '.responseCode // empty')
               if [[ -n "$responseCode" ]] && [[ "$responseCode" != "200" ]] && [[ "$responseCode" != "201" ]]; then
                   local error_message=$(echo "$response" | jq -r '.message // "Unknown API error"')
-                  echo "::error title=Fortify SSC API Error::HTTP $responseCode - $error_message. Check FORTIFY_SSC_API_URL and FORTIFY_UNIFIED_LOGIN_TOKEN."
+                  local error_code=$(echo "$response" | jq -r '.errorCode // "Unknown"')
+                  
+                  echo "::error title=Fortify SSC API Error::HTTP $responseCode - $error_message"
                   echo "❌ Código de retorno diferente de 200: API retornou código $responseCode"
-                  echo "❌ Resposta da API: $response"
+                  echo "❌ Código de erro: $error_code"
+                  echo "❌ Mensagem de erro: $error_message"
+                  echo "❌ Resposta completa da API: $response"
+                  
+                  if [[ -n "$operation" ]]; then
+                      echo "🔍 Operação que falhou: $operation"
+                  fi
+                  
+                  # Sugestões específicas baseadas no código de erro
+                  case $error_code in
+                      -10301)
+                          echo "🔍 Sugestão: Token de autenticação inválido ou expirado"
+                          echo "   - Verifique se FORTIFY_UNIFIED_LOGIN_TOKEN está correto"
+                          echo "   - Verifique se o token não expirou"
+                          echo "   - Verifique se o usuário tem permissões adequadas"
+                          ;;
+                      -10302)
+                          echo "🔍 Sugestão: URL do SSC incorreta"
+                          echo "   - Verifique se FORTIFY_SSC_API_URL está correto"
+                          echo "   - Verifique se a URL termina com /ssc/api/v1"
+                          ;;
+                      *)
+                          echo "🔍 Verifique:"
+                          echo "   - FORTIFY_SSC_API_URL está correto"
+                          echo "   - FORTIFY_UNIFIED_LOGIN_TOKEN está válido"
+                          echo "   - Usuário tem permissões adequadas"
+                          ;;
+                  esac
+                  
                   exit 1
               fi
               
               if [[ -n "$exit_code" ]] && [[ "$exit_code" != "0" ]]; then
                   echo "::error title=API Call Failed::Command returned exit code $exit_code"
-                  echo "❌ Comando retornou $exit_code"
-                  echo "❌ Mensagem de erro: $response"  
+                  echo "❌ Comando retornou código de saída $exit_code"
+                  echo "❌ Mensagem de erro: $response"
+                  if [[ -n "$operation" ]]; then
+                      echo "🔍 Operação que falhou: $operation"
+                  fi
                   exit $exit_code
               fi
           }

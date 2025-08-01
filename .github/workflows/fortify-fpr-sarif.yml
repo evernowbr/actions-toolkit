@@ -86,15 +86,16 @@ jobs:
           echo "::notice title=Dependencies::All required tools found and configured"
 
       - name: Execute Fortify Scan
+        env:
+          fortify_project_name: ${{ inputs.name }}
+          fortify_version_name: ${{ inputs.version }}
+          fortify_ssc_api_url: ${{ secrets.FORTIFY_SSC_API_URL }}
+          fortify_unified_login_token: ${{ secrets.FORTIFY_UNIFIED_LOGIN_TOKEN }}
+          fortify_controller_url: ${{ secrets.FORTIFY_CONTROLLER_URL }}
+          fortify_controller_token: ${{ secrets.FORTIFY_CONTROLLER_TOKEN }}
         run: |
-          # Definir variáveis de ambiente (como nos códigos que funcionam)
-          fortify_project_name="${{ inputs.name }}"
-          fortify_version_name="${{ inputs.version }}"
-          fortify_ssc_api_url="${{ secrets.FORTIFY_SSC_API_URL }}"
-          fortify_unified_login_token="${{ secrets.FORTIFY_UNIFIED_LOGIN_TOKEN }}"
-          fortify_controller_url="${{ secrets.FORTIFY_CONTROLLER_URL }}"
-          fortify_controller_token="${{ secrets.FORTIFY_CONTROLLER_TOKEN }}"
-          
+          echo "::notice title=Debug::Starting script execution"
+          echo "::notice title=Debug::Environment variables configured via env block"
           echo "::notice title=Fortify Scan::Starting Fortify SAST scan execution"
           echo "::notice title=Environment::Project: $fortify_project_name, Version: $fortify_version_name"
           echo "🔧 Configurando Fortify ScanCentral Client..."
@@ -175,13 +176,190 @@ jobs:
               fi
           }
           
-          fortify_regras_processamento() {
-              echo "::notice title=Processing Rules::Configuring result processing rules"
-              response=$(curl -sS -k -X PUT --header "Content-Type: application/json" --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/projectVersions/$version_id/resultProcessingRules" -d '[{"identifier": "com.fortify.manager.BLL.processingrules.BuildProjectProcessingRule","displayName": "Require approval if the Build Project is different between scans","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.FileCountProcessingRule","displayName": "Require approval if file count differs by more than 10%","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.LOCCountProcessingRule","displayName": "Require approval if line count differs by more than 10%","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.NewerEngineVersionProcessingRule","displayName": "Require approval if the engine version of a scan is newer than the engine version of the previous scan","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.RulePackVersionProcessingRule","displayName": "Require approval if the rulepacks used in the scan do not match the rulepacks used in the previous scan","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.WarningProcessingRule","displayName": "Require approval if result has analysis warnings","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.ExternalListVersionProcessingRule","displayName": "Check external metadata file versions in scan against versions on server.","displayable": true,"enabled": false}]')
-              exit_code=$?
-              fortify_verificar_resposta_api
-              echo "::notice title=Processing Rules::Result processing rules configured successfully"
-          }
+                     fortify_regras_processamento() {
+               echo "::notice title=Processing Rules::Configuring result processing rules"
+               response=$(curl -sS -k -X PUT --header "Content-Type: application/json" --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/projectVersions/$version_id/resultProcessingRules" -d '[{"identifier": "com.fortify.manager.BLL.processingrules.BuildProjectProcessingRule","displayName": "Require approval if the Build Project is different between scans","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.FileCountProcessingRule","displayName": "Require approval if file count differs by more than 10%","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.LOCCountProcessingRule","displayName": "Require approval if line count differs by more than 10%","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.NewerEngineVersionProcessingRule","displayName": "Require approval if the engine version of a scan is newer than the engine version of the previous scan","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.RulePackVersionProcessingRule","displayName": "Require approval if the rulepacks used in the scan do not match the rulepacks used in the previous scan","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.WarningProcessingRule","displayName": "Require approval if result has analysis warnings","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.ExternalListVersionProcessingRule","displayName": "Check external metadata file versions in scan against versions on server.","displayable": true,"enabled": false}]')
+               exit_code=$?
+               fortify_verificar_resposta_api
+               echo "::notice title=Processing Rules::Result processing rules configured successfully"
+           }
+           
+           # ========== FUNÇÕES PARA RELATÓRIO AVANÇADO ==========
+           # Implementação de relatório visual estilo Trivy Scanner
+           # - Extrai dados detalhados via API do Fortify SSC
+           # - Gera tabelas formatadas com vulnerabilidades
+           # - Breakdown por categoria e severidade  
+           # - Resumo executivo com recomendações
+           # - Compatível com diferentes versões da API (friority/priority)
+           # - Tratamento robusto de erros e valores ausentes
+           
+           fortify_extrair_estatisticas_completas() {
+               echo "📊 Extraindo estatísticas completas de vulnerabilidades..."
+               
+               # Verifica se temos o project_version_id
+               if [ -z "$version_id" ]; then
+                   echo "❌ ID da versão do projeto não encontrado. Não é possível gerar relatório."
+                   return 1
+               fi
+               
+               # Busca TODAS as vulnerabilidades (sem filtro de severidade)
+               all_issues_response=$(curl -sS -k -X GET --header 'Content-Type: application/json' \
+                   --header 'Accept: application/json' \
+                   --header "Authorization: FortifyToken $fortify_unified_login_token" \
+                   "$fortify_ssc_api_url/projectVersions/$version_id/issues?limit=1000")
+               exit_code=$?
+               fortify_verificar_resposta_api
+               
+               # Verifica se a resposta tem dados válidos
+               if [ -z "$all_issues_response" ] || [ "$all_issues_response" = "null" ]; then
+                   echo "⚠️ Nenhum dado de vulnerabilidade retornado pela API. Pode ser que o scan ainda esteja processando."
+                   echo "0" > /tmp/fortify_total_count
+                   echo "0" > /tmp/fortify_critical_count  
+                   echo "0" > /tmp/fortify_high_count
+                   echo "0" > /tmp/fortify_medium_count
+                   echo "0" > /tmp/fortify_low_count
+                   echo '{"data":[]}' > /tmp/fortify_all_issues.json
+                   return 0
+               fi
+               
+               # Salva os dados para análise
+               echo "$all_issues_response" > /tmp/fortify_all_issues.json
+               
+               # Contadores por severidade (tenta friority e priority como fallback)
+               critical_count=$(echo "$all_issues_response" | jq '[.data[] | select((.friority // .priority) == "Critical")] | length')
+               high_count=$(echo "$all_issues_response" | jq '[.data[] | select((.friority // .priority) == "High")] | length')
+               medium_count=$(echo "$all_issues_response" | jq '[.data[] | select((.friority // .priority) == "Medium")] | length')
+               low_count=$(echo "$all_issues_response" | jq '[.data[] | select((.friority // .priority) == "Low")] | length')
+               total_count=$(echo "$all_issues_response" | jq '.data | length')
+               
+               # Valida se os contadores são números válidos
+               critical_count=${critical_count:-0}
+               high_count=${high_count:-0}
+               medium_count=${medium_count:-0}
+               low_count=${low_count:-0}
+               total_count=${total_count:-0}
+               
+               # Salva para uso posterior
+               echo "$critical_count" > /tmp/fortify_critical_count
+               echo "$high_count" > /tmp/fortify_high_count  
+               echo "$medium_count" > /tmp/fortify_medium_count
+               echo "$low_count" > /tmp/fortify_low_count
+               echo "$total_count" > /tmp/fortify_total_count
+           }
+
+           gerar_relatorio_fortify() {
+             echo " "
+             echo " "
+             echo "+----------------- 📊 FORTIFY SAST SCAN SUMMARY --------------------+"
+             echo "| Projeto: $fortify_project_name $fortify_version_name"
+             echo "+--------------------------------------------------------------------+"
+             
+             # Lê contadores salvos
+             critical_count=$(cat /tmp/fortify_critical_count 2>/dev/null || echo 0)
+             high_count=$(cat /tmp/fortify_high_count 2>/dev/null || echo 0)
+             medium_count=$(cat /tmp/fortify_medium_count 2>/dev/null || echo 0)
+             low_count=$(cat /tmp/fortify_low_count 2>/dev/null || echo 0)
+             total_count=$(cat /tmp/fortify_total_count 2>/dev/null || echo 0)
+             
+             echo "| Total: $total_count (CRITICAL: $critical_count, HIGH: $high_count, MEDIUM: $medium_count, LOW: $low_count)"
+             echo "+------------------------------+------------+----------+-----------------------------+----------------+-------------------------------+"
+             echo "| CATEGORY                     | ISSUE ID   | SEVERITY | PRIMARY LOCATION            | TAGGED         | RECOMMENDATIONS               |"
+             echo "+------------------------------+------------+----------+-----------------------------+----------------+-------------------------------+"
+             
+             # TABELA DETALHADA DE FINDINGS
+             cat /tmp/fortify_all_issues.json 2>/dev/null | jq -r '
+               .data | .[0:10] | .[] | [
+                 (if .subCategoryName then .subCategoryName
+                  elif .categoryName then .categoryName
+                  elif .issueName then .issueName
+                  elif .subCategory then .subCategory
+                  elif .category then .category
+                  elif .kingdom then .kingdom
+                  else "Unknown"
+                  end),
+                 (.issueInstanceId // (.id | tostring)),
+                 (.friority // .priority // "Unknown"),
+                 ((.fileName // .primaryLocation // .folderName // "Unknown File") + ":" + ((.lineNumber // "N/A")|tostring)),
+                 (.analysisType // .analysis.analysisType // .analysisName // .analysis // (.customAttributes[]? | select(.name=="Tagged") | .value) // (.attributes[]? | select(.name=="Tagged") | .value) // "N/A"),
+                 (.description // "Ver detalhes no SSC")
+               ] | @tsv' | while IFS=$'\t' read -r category issue severity location tagged recommendation; do
+               mapfile -t lines < <(echo "$category" | fold -s -w 28 | head -n 3)
+               for i in "${!lines[@]}"; do
+                 if [[ $i -eq 0 ]]; then
+                   printf "| %-28s | %-10s | %-8s | %-27s | %-15s | %-29s |\n" \
+                     "${lines[$i]}" "${issue:0:10}" "${severity:0:8}" "${location:0:27}" "${tagged:0:15}" "${recommendation:0:29}"
+                 else
+                   printf "| %-28s | %-10s | %-8s | %-27s | %-15s | %-29s |\n" "${lines[$i]}" "" "" "" "" ""
+                 fi
+               done
+               echo "+------------------------------+------------+----------+-----------------------------+----------------+-------------------------------+"
+             done
+             
+             # BREAKDOWN DETALHADO POR CATEGORIA E SEVERIDADE
+             echo " "
+             echo "🔍 DETAILED BREAKDOWN BY CATEGORY:"
+             echo "+------------------------------+------------+----------+----------+----------+---------------+"
+             echo "| CATEGORY                     | CRITICAL   | HIGH     | MEDIUM   | LOW      | TOTAL ISSUES  |"
+             echo "+------------------------------+------------+----------+----------+----------+---------------+"
+             
+             cat /tmp/fortify_all_issues.json | jq -r '
+               .data[] | 
+               [(.subCategoryName // .categoryName // .issueName // .subCategory // .category // .kingdom // "Unknown"), (.friority // .priority // "Unknown")] | @tsv' | awk -F'\t' '
+               function wrap(str, width, arr, n, out, i, len) {
+                 n = split(str, arr, " ");
+                 out = arr[1];
+                 len = length(arr[1]);
+                 for (i=2; i<=n; i++) {
+                   if (len + 1 + length(arr[i]) > width) {
+                     out = out "\n" arr[i];
+                     len = length(arr[i]);
+                   } else {
+                     out = out " " arr[i];
+                     len += 1 + length(arr[i]);
+                   }
+                 }
+                 return out;
+               }
+               {
+                 c[$1, $2]++;
+                 cat[$1]=1;
+               }
+               END {
+                 sep = "+------------------------------+------------+----------+----------+----------+---------------+";
+                 for (k in cat) {
+                   crit = c[k, "Critical"]+0;
+                   high = c[k, "High"]+0;
+                   med  = c[k, "Medium"]+0;
+                   low  = c[k, "Low"]+0;
+                   total = crit+high+med+low;
+                   wrapped = wrap(k, 28);
+                   n = split(wrapped, lines, "\n");
+                   for (i=1; i<=n; i++) {
+                     if (i==1) {
+                       printf "| %-28s | %-10s | %-8s | %-8s | %-8s | %-13s |\n", lines[i], crit, high, med, low, total;
+                     } else {
+                       printf "|   %-26s | %-10s | %-8s | %-8s | %-8s | %-13s |\n", lines[i], "", "", "", "", "";
+                     }
+                   }
+                   print sep;
+                 }
+                 
+               }'
+             echo " "
+             echo "📊 EXECUTIVE SUMMARY:"
+             echo "+-------------------------------+"
+             printf "| %-29s|\n" "CRITICAL: $critical_count"
+             printf "| %-29s|\n" "HIGH:    $high_count"
+             printf "| %-29s|\n" "MEDIUM:  $medium_count"
+             printf "| %-29s|\n" "LOW:     $low_count"
+             printf "| %-29s|\n" "TOTAL ISSUES FOUND: $total_count"
+             echo "+-------------------------------+"
+             echo " "
+             # Garantir link absoluto
+             echo "🔗 Detailed Report: https://fortify-ssc.evernow.com.br/html/ssc/version/${version_id}/audit"
+             echo "+-------------------------------------------------------------------------------------------------------------+"
+             echo " "
+           }
           
           echo '   ____            __   _  ___        ____ ___    ____ ______ '
           echo '  / __/___   ____ / /_ (_)/ _/__ __  / __// _ |  / __//_  __/ '
@@ -226,15 +404,31 @@ jobs:
           
           job_token=$(echo "$scan_output" | grep "Submitted job and received token" | grep -E -o "[a-f0-9-]{36}")
           
-          if [[ -z "$job_token" ]]; then
-              echo "::error title=Scan Failed::Job token not created. Check scancentral output for errors."
-              echo "❌ Job token não foi criado."
-              exit 1
-          else
-              echo "::notice title=Scan Success::Files submitted for scan with job token: $job_token"
-          fi
-          
-          echo "⚙️ Iniciando processamento das regras de gate para o projeto."
+                     if [[ -z "$job_token" ]]; then
+               echo "::error title=Scan Failed::Job token not created. Check scancentral output for errors."
+               echo "❌ Job token não foi criado."
+               exit 1
+           else
+               echo "::notice title=Scan Success::Files submitted for scan with job token: $job_token"
+           fi
+           
+           # ========== GERA RELATÓRIO DETALHADO ANTES DO GATE ==========
+           echo ""
+           echo "⏳ Aguardando finalização do scan para gerar relatório detalhado..."
+           sleep 60  # Aguarda o scan processar (aumentado para 60s)
+           
+           # Extrai estatísticas completas
+           if fortify_extrair_estatisticas_completas; then
+               # Gera relatório visual apenas se a extração foi bem-sucedida
+               echo ""
+               echo "📊 GERANDO RELATÓRIO DETALHADO:"
+               gerar_relatorio_fortify
+           else
+               echo "⚠️ Não foi possível extrair dados de vulnerabilidades para gerar relatório detalhado."
+               echo "   O gate de qualidade ainda será aplicado normalmente."
+           fi
+           
+           echo "⚙️ Iniciando processamento das regras de gate para o projeto."
           
           regras_json='[
             {
@@ -298,21 +492,36 @@ jobs:
                   echo '/ (_ // _ `// __// -_) / ___// _ `/(_-< (_-< '
                   echo '\___/ \_,_/ \__/ \__/ /_/    \_,_//___//___/ '
               fi
-          fi
-          
-          mkdir -p /tmp/fortify-metadata
-          echo "$version_id" > /tmp/fortify-metadata/version_id
-          echo "$job_token" > /tmp/fortify-metadata/job_token
-          echo "$fortify_project_name" > /tmp/fortify-metadata/project_name
-          echo "$fortify_version_name" > /tmp/fortify-metadata/version_name
+                     fi
+           
+           # Após gerar o relatório detalhado, salvar findings como artefato
+           echo "Salvando findings do Fortify como artefato para análise..."
+           if [ -f /tmp/fortify_all_issues.json ]; then
+             mkdir -p fortify-artifacts
+             cp /tmp/fortify_all_issues.json fortify-artifacts/
+           fi
+           
+           mkdir -p /tmp/fortify-metadata
+           echo "$version_id" > /tmp/fortify-metadata/version_id
+           echo "$job_token" > /tmp/fortify-metadata/job_token
+           echo "$fortify_project_name" > /tmp/fortify-metadata/project_name
+           echo "$fortify_version_name" > /tmp/fortify-metadata/version_name
 
-      - name: Upload scan metadata
-        uses: actions/upload-artifact@v4
-        with:
-          name: fortify-metadata-${{ github.run_number }}
-          path: /tmp/fortify-metadata/
-          retention-days: 2
-          if-no-files-found: error
+             - name: Upload scan metadata
+         uses: actions/upload-artifact@v4
+         with:
+           name: fortify-metadata-${{ github.run_number }}
+           path: /tmp/fortify-metadata/
+           retention-days: 2
+           if-no-files-found: error
+
+       - name: Upload Fortify findings
+         uses: actions/upload-artifact@v4
+         with:
+           name: fortify-findings-${{ github.run_number }}
+           path: fortify-artifacts/
+           retention-days: 7
+           if-no-files-found: warn
 
       - name: Create scan summary
         if: always()

@@ -85,8 +85,8 @@ jobs:
           
           echo "::notice title=Dependencies::All required tools found and configured"
 
-      - name: Execute Fortify Scan
-        env:
+       - name: Execute Fortify Scan
+         env:
           fortify_project_name: ${{ inputs.name }}
           fortify_version_name: ${{ inputs.version }}
           fortify_ssc_api_url: ${{ secrets.FORTIFY_SSC_API_URL }}
@@ -649,7 +649,7 @@ jobs:
                 echo "fortify-sast-results.sarif" > /tmp/fortify-metadata/sarif_file
             fi
 
-             - name: Upload scan metadata
+       - name: Upload scan metadata
          uses: actions/upload-artifact@v4
          with:
            name: fortify-metadata-${{ github.run_number }}
@@ -657,29 +657,29 @@ jobs:
            retention-days: 2
            if-no-files-found: error
 
-               - name: Upload Fortify findings
-          uses: actions/upload-artifact@v4
-          with:
-            name: fortify-findings-${{ github.run_number }}
-            path: fortify-artifacts/
-            retention-days: 7
-            if-no-files-found: warn
+       - name: Upload Fortify findings
+         uses: actions/upload-artifact@v4
+         with:
+           name: fortify-findings-${{ github.run_number }}
+           path: fortify-artifacts/
+           retention-days: 7
+           if-no-files-found: warn
 
-        - name: Upload SARIF to Code Scanning
-          uses: github/codeql-action/upload-sarif@v2
-          with:
-            sarif_file: fortify-artifacts/fortify-sast-results.sarif
-          continue-on-error: true
+       - name: Upload SARIF to Code Scanning
+         uses: github/codeql-action/upload-sarif@v2
+         with:
+           sarif_file: fortify-artifacts/fortify-sast-results.sarif
+         continue-on-error: true
 
-        - name: Upload SARIF Artifact
-          uses: actions/upload-artifact@v4
-          with:
-            name: fortify-sarif-${{ github.run_number }}
-            path: fortify-artifacts/fortify-sast-results.sarif
-            if-no-files-found: error
-            retention-days: 30
+       - name: Upload SARIF Artifact
+         uses: actions/upload-artifact@v4
+         with:
+           name: fortify-sarif-${{ github.run_number }}
+           path: fortify-artifacts/fortify-sast-results.sarif
+           if-no-files-found: error
+           retention-days: 30
 
-             - name: Create scan summary
+       - name: Create scan summary
          if: always()
          run: |
            if [ -f /tmp/fortify-metadata/version_id ]; then
@@ -716,5 +716,3 @@ jobs:
              echo "**Status:** FAILED" >> $GITHUB_STEP_SUMMARY
              echo "**Action Required:** Check logs for specific error details" >> $GITHUB_STEP_SUMMARY
            fi
-
-   

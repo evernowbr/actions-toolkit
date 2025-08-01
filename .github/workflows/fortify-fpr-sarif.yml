@@ -86,15 +86,15 @@ jobs:
           echo "::notice title=Dependencies::All required tools found and configured"
 
       - name: Execute Fortify Scan
-        env:
-          fortify_project_name: ${{ inputs.name }}
-          fortify_version_name: ${{ inputs.version }}
-          fortify_ssc_api_url: ${{ secrets.FORTIFY_SSC_API_URL }}
-          fortify_unified_login_token: ${{ secrets.FORTIFY_UNIFIED_LOGIN_TOKEN }}
-          fortify_controller_url: ${{ secrets.FORTIFY_CONTROLLER_URL }}
-          fortify_controller_token: ${{ secrets.FORTIFY_CONTROLLER_TOKEN }}
-
         run: |
+          # Definir variáveis de ambiente (como nos códigos que funcionam)
+          fortify_project_name="${{ inputs.name }}"
+          fortify_version_name="${{ inputs.version }}"
+          fortify_ssc_api_url="${{ secrets.FORTIFY_SSC_API_URL }}"
+          fortify_unified_login_token="${{ secrets.FORTIFY_UNIFIED_LOGIN_TOKEN }}"
+          fortify_controller_url="${{ secrets.FORTIFY_CONTROLLER_URL }}"
+          fortify_controller_token="${{ secrets.FORTIFY_CONTROLLER_TOKEN }}"
+          
           echo "::notice title=Fortify Scan::Starting Fortify SAST scan execution"
           echo "::notice title=Environment::Project: $fortify_project_name, Version: $fortify_version_name"
           echo "🔧 Configurando Fortify ScanCentral Client..."
@@ -144,12 +144,7 @@ jobs:
           
           echo "::notice title=Environment Validation::All environment variables are properly configured"
           
-          # Debug das variáveis (sem expor valores sensíveis)
-          echo "::notice title=Environment Debug::Checking environment variables"
-          echo "🔍 FORTIFY_SSC_API_URL: ${fortify_ssc_api_url:0:20}..."
-          echo "🔍 FORTIFY_UNIFIED_LOGIN_TOKEN: ${#fortify_unified_login_token} caracteres"
-          echo "🔍 FORTIFY_CONTROLLER_URL: ${fortify_controller_url:0:20}..."
-          echo "🔍 FORTIFY_CONTROLLER_TOKEN: ${#fortify_controller_token} caracteres"
+
           
           # Teste de conectividade básica
           echo "::notice title=Connectivity Test::Testing basic connectivity to Fortify SSC"
@@ -185,10 +180,8 @@ jobs:
           echo "🔐 Autenticação será validada durante as operações principais..."
           
           fortify_verificar_resposta_api() {
-              echo "🔍 Debug: exit_code=$exit_code, response length=${#response}"
               if [ "$exit_code" == "0" ] || [ "$exit_code" == "" ]; then
                   responseCode=$(echo "$response" | jq '.responseCode')
-                  echo "🔍 Debug: responseCode=$responseCode"
                   if [ "$responseCode" != "200" ] && [ "$responseCode" != "201" ]; then
                       echo "❌ Código de retorno diferente de 200: API retornou código $responseCode"
                       echo "❌ Resposta da API: $response"
@@ -265,31 +258,8 @@ jobs:
           echo "::notice title=Project Check::Checking if project $fortify_project_name exists in SSC"
           echo "🔍 Verificando se o projeto $fortify_project_name existe no SSC..."
           
-          # Debug da URL e token (sem expor valores sensíveis)
-          echo "🔍 URL da API: $fortify_ssc_api_url/projectVersions?q=$fortify_project_name&fulltextsearch=true"
-          echo "🔍 Token length: ${#fortify_unified_login_token} caracteres"
-          
-          # Verificar se a URL termina com /ssc/api/v1
-          if [[ ! "$fortify_ssc_api_url" =~ /ssc/api/v1$ ]]; then
-              echo "⚠️  Aviso: URL não termina com /ssc/api/v1"
-              echo "🔍 URL atual: $fortify_ssc_api_url"
-          else
-              echo "✅ URL está no formato correto"
-          fi
-          
-          # Verificar se o token tem caracteres especiais
-          if [[ "$fortify_unified_login_token" =~ [^a-zA-Z0-9] ]]; then
-              echo "⚠️  Aviso: Token pode conter caracteres especiais"
-          else
-              echo "✅ Token parece estar no formato correto"
-          fi
-          
-          response=$(curl -sS -k -X GET --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/projectVersions?q=$fortify_project_name&fulltextsearch=true" 2>&1)
+          response=$(curl -sS -k -X GET --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/projectVersions?q=$fortify_project_name&fulltextsearch=true")
           exit_code=$?
-          
-          # Debug da resposta
-          echo "🔍 Exit code: $exit_code"
-          echo "🔍 Response preview: ${response:0:200}..."
           
           fortify_verificar_resposta_api
           echo "::notice title=API Response::Project check completed successfully"

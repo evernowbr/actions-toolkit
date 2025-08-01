@@ -109,16 +109,30 @@ jobs:
           echo "::notice title=ScanCentral::scancentral configured and ready"
           
           fortify_verificar_resposta_api() {
-              if [[ "$exit_code" == "0" ]] || [[ "$exit_code" == "" ]]; then
-                  responseCode=$(echo "$response" | jq '.responseCode')
-                  if [[ "$responseCode" != "200" ]] && [[ "$responseCode" != "201" ]]; then
-                      error_message=$(echo "$response" | jq -r '.message // "Unknown API error"')
-                      echo "::error title=Fortify SSC API Error::HTTP $responseCode - $error_message. Check FORTIFY_SSC_API_URL and FORTIFY_UNIFIED_LOGIN_TOKEN."
-                      echo "❌ Código de retorno diferente de 200: API retornou código $responseCode"
-                      echo "❌ Resposta da API: $response"
-                      exit 1
-                  fi
-              else
+              local response="$1"
+              local exit_code="$2"
+              
+              if [[ -z "$response" ]]; then
+                  echo "::error title=API Error::Empty response from Fortify SSC API"
+                  exit 1
+              fi
+              
+              if ! echo "$response" | jq -e . >/dev/null 2>&1; then
+                  echo "::error title=API Error::Invalid JSON response from Fortify SSC API"
+                  echo "Response: $response"
+                  exit 1
+              fi
+              
+              local responseCode=$(echo "$response" | jq -r '.responseCode // empty')
+              if [[ -n "$responseCode" ]] && [[ "$responseCode" != "200" ]] && [[ "$responseCode" != "201" ]]; then
+                  local error_message=$(echo "$response" | jq -r '.message // "Unknown API error"')
+                  echo "::error title=Fortify SSC API Error::HTTP $responseCode - $error_message. Check FORTIFY_SSC_API_URL and FORTIFY_UNIFIED_LOGIN_TOKEN."
+                  echo "❌ Código de retorno diferente de 200: API retornou código $responseCode"
+                  echo "❌ Resposta da API: $response"
+                  exit 1
+              fi
+              
+              if [[ -n "$exit_code" ]] && [[ "$exit_code" != "0" ]]; then
                   echo "::error title=API Call Failed::Command returned exit code $exit_code"
                   echo "❌ Comando retornou $exit_code"
                   echo "❌ Mensagem de erro: $response"  
@@ -139,7 +153,7 @@ jobs:
               fortify_project_parameters='{"project":{"name":"'$fortify_project_name'"},"issueTemplateId":"Prioritized-HighRisk-Project-Template","name":"'$fortify_version_name'","customTagValuesAutoApply":true,"autoPredict":true,"predictionPolicy":"LAB Fortify Policy"}'
               response=$(curl -sS -k -X POST --header "Content-Type: application/json" --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/projectVersions" -d "$fortify_project_parameters")
               exit_code=$?
-              fortify_verificar_resposta_api
+              fortify_verificar_resposta_api "$response" "$exit_code"
               project_id=$(echo "$response" | jq '.data.project.id')
               version_id=$(echo "$response" | jq '.data.id')
               echo "::notice title=Project Created::Project $fortify_project_name created with ID $project_id"
@@ -151,7 +165,7 @@ jobs:
               fortify_project_parameters='{"project":{"name":"'$fortify_project_name'","id":"'$project_id'"},"issueTemplateId":"Prioritized-HighRisk-Project-Template","name": "'$fortify_version_name'"}'
               response=$(curl -sS -k -X POST --header "Content-Type: application/json" --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/projectVersions" -d "$fortify_project_parameters")
               exit_code=$?
-              fortify_verificar_resposta_api
+              fortify_verificar_resposta_api "$response" "$exit_code"
               version_id=$(echo "$response" | jq '.data.id')
               echo "::notice title=Version Created::Version $fortify_version_name created with ID $version_id"
           }
@@ -161,7 +175,7 @@ jobs:
               fortify_parametros='{"requests":[{"uri":"'$fortify_ssc_api_url/projectVersions/$version_id/attributes'","httpVerb":"PUT","postData":[{"values":[{"guid":"New"}],"attributeDefinitionId":5},{"values":[{"guid":"Internal"}],"attributeDefinitionId":6},{"values":[{"guid":"internalnetwork"}],"attributeDefinitionId":7}]},{"uri":"'$fortify_ssc_api_url/projectVersions/$version_id/authEntities'","httpVerb":"PUT","postData":[]},{"uri":"'$fortify_ssc_api_url/projectVersions/$version_id?hideProgress=true'","httpVerb":"PUT","postData":{"committed":true}}]}'
               response=$(curl -sS -k -X POST --header "Content-Type: application/json" --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/bulk" -d "$fortify_parametros")
               exit_code=$?
-              fortify_verificar_resposta_api
+              fortify_verificar_resposta_api "$response" "$exit_code"
               successCount=$(echo "$response" | jq '.successCount')
               if [[ "$successCount" != "3" ]]; then
                   echo "::error title=Project Configuration Failed::Only $successCount/3 configuration steps succeeded"
@@ -178,7 +192,7 @@ jobs:
               echo "::notice title=Processing Rules::Configuring result processing rules"
               response=$(curl -sS -k -X PUT --header "Content-Type: application/json" --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/projectVersions/$version_id/resultProcessingRules" -d '[{"identifier": "com.fortify.manager.BLL.processingrules.BuildProjectProcessingRule","displayName": "Require approval if the Build Project is different between scans","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.FileCountProcessingRule","displayName": "Require approval if file count differs by more than 10%","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.LOCCountProcessingRule","displayName": "Require approval if line count differs by more than 10%","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.NewerEngineVersionProcessingRule","displayName": "Require approval if the engine version of a scan is newer than the engine version of the previous scan","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.RulePackVersionProcessingRule","displayName": "Require approval if the rulepacks used in the scan do not match the rulepacks used in the previous scan","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.WarningProcessingRule","displayName": "Require approval if result has analysis warnings","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.ExternalListVersionProcessingRule","displayName": "Check external metadata file versions in scan against versions on server.","displayable": true,"enabled": false}]')
               exit_code=$?
-              fortify_verificar_resposta_api
+              fortify_verificar_resposta_api "$response" "$exit_code"
               echo "::notice title=Processing Rules::Result processing rules configured successfully"
           }
           
@@ -191,7 +205,7 @@ jobs:
           echo "🔍 Verificando se o projeto $fortify_project_name existe no SSC..."
           response=$(curl -sS -k -X GET --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/projectVersions?q=$fortify_project_name&fulltextsearch=true")
           exit_code=$?
-          fortify_verificar_resposta_api
+          fortify_verificar_resposta_api "$response" "$exit_code"
           project_id=$(echo "$response" | jq '.data[] | select(.project.name=="'$fortify_project_name'") | .project.id' | head -1 | awk '{$1=$1};1')
           version_id=$(echo "$response" | jq '.data[] | select(.project.name=="'$fortify_project_name'") | select(.name=="'$fortify_version_name'") | .id' | awk '{$1=$1};1')
           
@@ -269,7 +283,7 @@ jobs:
                   "$fortify_ssc_api_url/projectVersions/$version_id/issues?qm=issues&q=$filtro_url_encoded")
               exit_code=$?
           
-              fortify_verificar_resposta_api
+              fortify_verificar_resposta_api "$response" "$exit_code"
           
               num_issues=$(echo "$response" | jq '.count')
           

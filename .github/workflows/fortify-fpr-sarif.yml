@@ -185,8 +185,10 @@ jobs:
           echo "🔐 Autenticação será validada durante as operações principais..."
           
           fortify_verificar_resposta_api() {
+              echo "🔍 Debug: exit_code=$exit_code, response length=${#response}"
               if [ "$exit_code" == "0" ] || [ "$exit_code" == "" ]; then
                   responseCode=$(echo "$response" | jq '.responseCode')
+                  echo "🔍 Debug: responseCode=$responseCode"
                   if [ "$responseCode" != "200" ] && [ "$responseCode" != "201" ]; then
                       echo "❌ Código de retorno diferente de 200: API retornou código $responseCode"
                       echo "❌ Resposta da API: $response"
@@ -262,8 +264,33 @@ jobs:
           
           echo "::notice title=Project Check::Checking if project $fortify_project_name exists in SSC"
           echo "🔍 Verificando se o projeto $fortify_project_name existe no SSC..."
-          response=$(curl -sS -k -X GET --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/projectVersions?q=$fortify_project_name&fulltextsearch=true")
+          
+          # Debug da URL e token (sem expor valores sensíveis)
+          echo "🔍 URL da API: $fortify_ssc_api_url/projectVersions?q=$fortify_project_name&fulltextsearch=true"
+          echo "🔍 Token length: ${#fortify_unified_login_token} caracteres"
+          
+          # Verificar se a URL termina com /ssc/api/v1
+          if [[ ! "$fortify_ssc_api_url" =~ /ssc/api/v1$ ]]; then
+              echo "⚠️  Aviso: URL não termina com /ssc/api/v1"
+              echo "🔍 URL atual: $fortify_ssc_api_url"
+          else
+              echo "✅ URL está no formato correto"
+          fi
+          
+          # Verificar se o token tem caracteres especiais
+          if [[ "$fortify_unified_login_token" =~ [^a-zA-Z0-9] ]]; then
+              echo "⚠️  Aviso: Token pode conter caracteres especiais"
+          else
+              echo "✅ Token parece estar no formato correto"
+          fi
+          
+          response=$(curl -sS -k -X GET --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/projectVersions?q=$fortify_project_name&fulltextsearch=true" 2>&1)
           exit_code=$?
+          
+          # Debug da resposta
+          echo "🔍 Exit code: $exit_code"
+          echo "🔍 Response preview: ${response:0:200}..."
+          
           fortify_verificar_resposta_api
           echo "::notice title=API Response::Project check completed successfully"
           project_id=$(echo "$response" | jq '.data[] | select(.project.name=="'$fortify_project_name'") | .project.id' | head -1 | awk '{$1=$1};1')

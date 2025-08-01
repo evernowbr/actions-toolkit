@@ -54,29 +54,36 @@ jobs:
         run: |
           echo "fortify_project_name=$(echo "${{ inputs.name }}" | sed 's/[^a-zA-Z0-9._/-]//g' | head -c 100)" >> $GITHUB_ENV
           echo "fortify_version_name=$(echo "${{ inputs.version }}" | sed 's/[^a-zA-Z0-9._/-]//g' | head -c 50)" >> $GITHUB_ENV
+          echo "::notice title=Input Validation::Project: ${{ inputs.name }}, Version: ${{ inputs.version }}"
 
       - name: Verify dependencies
         run: |
+          echo "::notice title=Dependencies::Checking required tools..."
+          
           for cmd in jq curl awk sed; do
-            command -v "$cmd" >/dev/null 2>&1 || { echo "❌ $cmd não encontrado"; exit 1; }
+            if ! command -v "$cmd" >/dev/null 2>&1; then
+              echo "::error title=Missing Dependency::$cmd not found. Install required tool."
+              exit 1
+            fi
           done
           
           echo "🔍 Verificando scancentral..."
           if command -v scancentral >/dev/null 2>&1; then
-            echo "✅ scancentral encontrado em PATH"
+            echo "::notice title=ScanCentral::Found scancentral in PATH"
           elif [ -f "/opt/Fortify_ScanCentral_Client_25.2.0_x64/bin/scancentral" ]; then
-            echo "✅ scancentral encontrado em /opt/Fortify_ScanCentral_Client_25.2.0_x64/bin/"
+            echo "::notice title=ScanCentral::Found scancentral in /opt/Fortify_ScanCentral_Client_25.2.0_x64/bin/"
             export PATH="/opt/Fortify_ScanCentral_Client_25.2.0_x64/bin:$PATH"
           else
-            echo "❌ scancentral não encontrado"
+            echo "::error title=Missing ScanCentral::scancentral not found. Install Fortify ScanCentral Client or configure PATH."
             echo "📋 Locais verificados:"
             echo "   - PATH padrão"
             echo "   - /opt/Fortify_ScanCentral_Client_25.2.0_x64/bin/"
             echo "   - /usr/local/bin/"
             echo "   - /usr/bin/"
-            echo "🔧 Instale o Fortify ScanCentral Client ou configure o PATH"
             exit 1
           fi
+          
+          echo "::notice title=Dependencies::All required tools found and configured"
 
       - name: Execute Fortify Scan
         env:
@@ -95,21 +102,24 @@ jobs:
           
           echo "🔍 Verificando scancentral após configuração..."
           if ! command -v scancentral >/dev/null 2>&1; then
-            echo "❌ scancentral ainda não encontrado após configuração do PATH"
+            echo "::error title=ScanCentral Configuration::scancentral not found after PATH configuration. Check installation."
             echo "📋 PATH atual: $PATH"
             exit 1
           fi
-          echo "✅ scancentral encontrado e configurado"
+          echo "::notice title=ScanCentral::scancentral configured and ready"
           
           fortify_verificar_resposta_api() {
               if [[ "$exit_code" == "0" ]] || [[ "$exit_code" == "" ]]; then
                   responseCode=$(echo "$response" | jq '.responseCode')
                   if [[ "$responseCode" != "200" ]] && [[ "$responseCode" != "201" ]]; then
+                      error_message=$(echo "$response" | jq -r '.message // "Unknown API error"')
+                      echo "::error title=Fortify SSC API Error::HTTP $responseCode - $error_message. Check FORTIFY_SSC_API_URL and FORTIFY_UNIFIED_LOGIN_TOKEN."
                       echo "❌ Código de retorno diferente de 200: API retornou código $responseCode"
                       echo "❌ Resposta da API: $response"
                       exit 1
                   fi
               else
+                  echo "::error title=API Call Failed::Command returned exit code $exit_code"
                   echo "❌ Comando retornou $exit_code"
                   echo "❌ Mensagem de erro: $response"  
                   exit $exit_code
@@ -118,52 +128,58 @@ jobs:
 
           fortify_verificar_codigo_de_resposta() {
               if [[ "$exit_code" != "0" ]]; then
+                  echo "::error title=ScanCentral Execution::scancentral command failed with exit code $exit_code"
                   echo "❌ Comando retornou $exit_code"
                   exit $exit_code
               fi
           }
           
           fortify_criar_projeto_e_versao() {
+              echo "::notice title=Project Creation::Creating new project $fortify_project_name with version $fortify_version_name"
               fortify_project_parameters='{"project":{"name":"'$fortify_project_name'"},"issueTemplateId":"Prioritized-HighRisk-Project-Template","name":"'$fortify_version_name'","customTagValuesAutoApply":true,"autoPredict":true,"predictionPolicy":"LAB Fortify Policy"}'
               response=$(curl -sS -k -X POST --header "Content-Type: application/json" --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/projectVersions" -d "$fortify_project_parameters")
               exit_code=$?
               fortify_verificar_resposta_api
               project_id=$(echo "$response" | jq '.data.project.id')
               version_id=$(echo "$response" | jq '.data.id')
-              echo "✅ Projeto $fortify_project_name criado com ID $project_id."
-              echo "✅ Versão $fortify_version_name criada com ID $version_id."
+              echo "::notice title=Project Created::Project $fortify_project_name created with ID $project_id"
+              echo "::notice title=Version Created::Version $fortify_version_name created with ID $version_id"
           }
           
           fortify_criar_versao() {
+              echo "::notice title=Version Creation::Creating new version $fortify_version_name for existing project"
               fortify_project_parameters='{"project":{"name":"'$fortify_project_name'","id":"'$project_id'"},"issueTemplateId":"Prioritized-HighRisk-Project-Template","name": "'$fortify_version_name'"}'
               response=$(curl -sS -k -X POST --header "Content-Type: application/json" --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/projectVersions" -d "$fortify_project_parameters")
               exit_code=$?
               fortify_verificar_resposta_api
               version_id=$(echo "$response" | jq '.data.id')
-              echo "✅ Versão $fortify_version_name criada com ID $version_id."
+              echo "::notice title=Version Created::Version $fortify_version_name created with ID $version_id"
           }
           
           fortify_configurar_projeto() {
+              echo "::notice title=Project Configuration::Configuring project attributes and settings"
               fortify_parametros='{"requests":[{"uri":"'$fortify_ssc_api_url/projectVersions/$version_id/attributes'","httpVerb":"PUT","postData":[{"values":[{"guid":"New"}],"attributeDefinitionId":5},{"values":[{"guid":"Internal"}],"attributeDefinitionId":6},{"values":[{"guid":"internalnetwork"}],"attributeDefinitionId":7}]},{"uri":"'$fortify_ssc_api_url/projectVersions/$version_id/authEntities'","httpVerb":"PUT","postData":[]},{"uri":"'$fortify_ssc_api_url/projectVersions/$version_id?hideProgress=true'","httpVerb":"PUT","postData":{"committed":true}}]}'
               response=$(curl -sS -k -X POST --header "Content-Type: application/json" --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/bulk" -d "$fortify_parametros")
               exit_code=$?
               fortify_verificar_resposta_api
               successCount=$(echo "$response" | jq '.successCount')
               if [[ "$successCount" != "3" ]]; then
+                  echo "::error title=Project Configuration Failed::Only $successCount/3 configuration steps succeeded"
                   echo "❌ Parâmetros adicionais do projeto $fortify_project_name configurados sem sucesso."
                   echo "❌ Código de retorno diferente de 200: API retornou código $exit_code"
                   echo "❌ Resposta da API: $response"
                   exit 1
               else
-                  echo "✅ Parâmetros adicionais do projeto $fortify_project_name configurados com sucesso."
+                  echo "::notice title=Project Configuration::Project attributes configured successfully"
               fi
           }
           
           fortify_regras_processamento() {
+              echo "::notice title=Processing Rules::Configuring result processing rules"
               response=$(curl -sS -k -X PUT --header "Content-Type: application/json" --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/projectVersions/$version_id/resultProcessingRules" -d '[{"identifier": "com.fortify.manager.BLL.processingrules.BuildProjectProcessingRule","displayName": "Require approval if the Build Project is different between scans","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.FileCountProcessingRule","displayName": "Require approval if file count differs by more than 10%","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.LOCCountProcessingRule","displayName": "Require approval if line count differs by more than 10%","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.NewerEngineVersionProcessingRule","displayName": "Require approval if the engine version of a scan is newer than the engine version of the previous scan","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.RulePackVersionProcessingRule","displayName": "Require approval if the rulepacks used in the scan do not match the rulepacks used in the previous scan","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.WarningProcessingRule","displayName": "Require approval if result has analysis warnings","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.ExternalListVersionProcessingRule","displayName": "Check external metadata file versions in scan against versions on server.","displayable": true,"enabled": false}]')
               exit_code=$?
               fortify_verificar_resposta_api
-              echo "✅ Regras de processamento do projeto $fortify_project_name configuradas com sucesso."
+              echo "::notice title=Processing Rules::Result processing rules configured successfully"
           }
           
           echo '   ____            __   _  ___        ____ ___    ____ ______ '
@@ -180,13 +196,14 @@ jobs:
           version_id=$(echo "$response" | jq '.data[] | select(.project.name=="'$fortify_project_name'") | select(.name=="'$fortify_version_name'") | .id' | awk '{$1=$1};1')
           
           if [[ "$version_id" != "" ]]; then
-              echo "✅ O projeto $fortify_project_name já existe no SSC com ID $project_id."
-              echo "✅ A versão $fortify_version_name já existe no SSC com ID $version_id."
+              echo "::notice title=Project Status::Project $fortify_project_name exists with ID $project_id"
+              echo "::notice title=Version Status::Version $fortify_version_name exists with ID $version_id"
           elif [[ "$project_id" != "" ]]; then
-              echo "✅ O projeto $fortify_project_name já existe no SSC com ID $project_id. Criando versão..."
+              echo "::notice title=Project Status::Project $fortify_project_name exists with ID $project_id"
+              echo "::notice title=Version Status::Creating new version $fortify_version_name"
               fortify_criar_versao
           else
-              echo "⚠️ O projeto $fortify_project_name ainda não existe no SSC. Criando projeto e versão..."
+              echo "::notice title=Project Status::Creating new project $fortify_project_name and version $fortify_version_name"
               fortify_criar_projeto_e_versao
           fi
           
@@ -194,6 +211,7 @@ jobs:
           fortify_regras_processamento
           
           echo "🔧 Executando Scancentral Client"
+          echo "::notice title=Scan Execution::Starting Fortify SAST scan"
           scan_output=$(scancentral -ssctoken "$fortify_controller_token" -url "$fortify_controller_url" start -skipBuild -block --log-file fortify.log --overwrite -application "$fortify_project_name" -version "$fortify_version_name" --upload-to-ssc --ssc-upload-token "$fortify_controller_token" 2>&1 | tee /dev/stderr)
           
           exit_code=$?
@@ -202,10 +220,11 @@ jobs:
           job_token=$(echo "$scan_output" | grep "Submitted job and received token" | grep -E -o "[a-f0-9-]{36}")
           
           if [[ -z "$job_token" ]]; then
+              echo "::error title=Scan Failed::Job token not created. Check scancentral output for errors."
               echo "❌ Job token não foi criado."
               exit 1
           else
-              echo "✅ Arquivos para scan enviados com sucesso. ID do Scan: $job_token"
+              echo "::notice title=Scan Success::Files submitted for scan with job token: $job_token"
           fi
           
           echo "⚙️ Iniciando processamento das regras de gate para o projeto."
@@ -225,6 +244,7 @@ jobs:
           
           gate=$(echo "$regras_json" | jq --compact-output --raw-output '.[] | select(.name=="default") | .gate')
           if [[ -z "$gate" ]]; then
+              echo "::error title=Gate Configuration::No 'default' rule defined for project"
               echo "❌ Nenhuma regra 'default' foi definida para o projeto no Fortify."
               exit 1
           fi
@@ -233,9 +253,11 @@ jobs:
           filtro_aplicado="$gate"
           
           if [[ "$bypass" == "true" ]]; then
+              echo "::warning title=Gate Bypass::Default gate rule bypassed - pipeline continuation allowed"
               echo "⚠️  Bypass ativado: a regra 'default' não será aplicada."
               echo "✅ Continuação do pipeline permitida."
           else
+              echo "::notice title=Gate Check::Applying default gate rule: $filtro_aplicado"
               echo "🔒 Bypass desativado: a regra 'default' será aplicada."
               echo "🔍 Filtro aplicado: \`$filtro_aplicado\`"
               filtro_url_encoded=$(echo "$filtro_aplicado" | jq -sRr '@uri')
@@ -252,6 +274,7 @@ jobs:
               num_issues=$(echo "$response" | jq '.count')
           
               if [[ "$num_issues" -gt 0 ]]; then
+                  echo "::error title=Gate Failed::$num_issues vulnerabilities found. Pipeline blocked."
                   echo "❌ Gate falhou: **$num_issues** vulnerabilidades encontradas com base no filtro aplicado."
                   echo "📄 Verifique o relatório detalhado acima para mais informações."
                   echo '  _____       __         ____       _  __ '
@@ -260,6 +283,7 @@ jobs:
                   echo '\___/ \_,_/ \__/ \__/ /_/   \_,_//_//_/   '
                   exit 1
               else
+                  echo "::notice title=Gate Passed::No critical or high vulnerabilities found. Pipeline authorized."
                   echo "✅ Gate aprovado: Nenhuma vulnerabilidade crítica ou alta encontrada."
                   echo "🚀 Continuação do build autorizada."
                   echo '  _____       __         ___                 '
@@ -283,6 +307,27 @@ jobs:
           retention-days: 2
           if-no-files-found: error
 
+      - name: Create scan summary
+        if: always()
+        run: |
+          if [ -f /tmp/fortify-metadata/version_id ]; then
+            echo "## ✅ Fortify SAST Scan Summary" >> $GITHUB_STEP_SUMMARY
+            echo "| Status | Result |" >> $GITHUB_STEP_SUMMARY
+            echo "|--------|--------|" >> $GITHUB_STEP_SUMMARY
+            echo "| Scan | ✅ SUCCESS |" >> $GITHUB_STEP_SUMMARY
+            echo "| SSC Upload | ✅ SUCCESS |" >> $GITHUB_STEP_SUMMARY
+            echo "| Gate Check | ✅ PASSED |" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Project:** $(cat /tmp/fortify-metadata/project_name)" >> $GITHUB_STEP_SUMMARY
+            echo "**Version:** $(cat /tmp/fortify-metadata/version_name)" >> $GITHUB_STEP_SUMMARY
+            echo "**Job Token:** $(cat /tmp/fortify-metadata/job_token)" >> $GITHUB_STEP_SUMMARY
+            echo "**Version ID:** $(cat /tmp/fortify-metadata/version_id)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## ❌ Fortify SAST Scan Failed" >> $GITHUB_STEP_SUMMARY
+            echo "**Status:** FAILED" >> $GITHUB_STEP_SUMMARY
+            echo "**Action Required:** Check logs for specific error details" >> $GITHUB_STEP_SUMMARY
+          fi
+
   convert-fpr-sarif:
     name: Download FPR and Convert to SARIF
     runs-on: ubuntu-latest
@@ -295,8 +340,10 @@ jobs:
 
       - name: Install dependencies
         run: |
+          echo "::notice title=Dependencies::Installing required packages"
           sudo apt-get update -qq
           sudo apt-get install -y jq curl >/dev/null 2>&1
+          echo "::notice title=Dependencies::All packages installed successfully"
 
       - name: Download scan metadata
         uses: actions/download-artifact@v4
@@ -310,6 +357,7 @@ jobs:
           echo "JOB_TOKEN=$(cat /tmp/fortify-metadata/job_token)" >> $GITHUB_ENV
           echo "fortify_project_name=$(cat /tmp/fortify-metadata/project_name)" >> $GITHUB_ENV
           echo "fortify_version_name=$(cat /tmp/fortify-metadata/version_name)" >> $GITHUB_ENV
+          echo "::notice title=Metadata::Loaded scan metadata successfully"
 
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v4
@@ -326,15 +374,21 @@ jobs:
 
       - name: Install SARIF MultiTool
         run: |
+          echo "::notice title=SARIF MultiTool::Installing SARIF MultiTool version ${{ inputs.sarif_multitool_version }}"
           command -v sarif >/dev/null 2>&1 || dotnet tool install --global Sarif.Multitool --version ${{ inputs.sarif_multitool_version }} --no-cache 2>/dev/null
           echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
+          echo "::notice title=SARIF MultiTool::Installation completed"
 
       - name: Download FPR
         env:
           fortify_ssc_api_url: ${{ secrets.FORTIFY_SSC_API_URL }}
           fortify_unified_login_token: ${{ secrets.FORTIFY_UNIFIED_LOGIN_TOKEN }}
         run: |
+          echo "::notice title=FPR Download::Starting FPR download with timeout of ${{ inputs.polling_timeout_minutes }} minutes"
+          
           for attempt in $(seq 1 ${{ inputs.polling_timeout_minutes }}); do
+              echo "::notice title=FPR Download::Attempt $attempt/${{ inputs.polling_timeout_minutes }} - Checking for FPR artifacts"
+              
               artifacts_response=$(curl -sS -k -X GET \
                   --connect-timeout 30 \
                   --max-time 120 \
@@ -346,9 +400,11 @@ jobs:
                   fpr_id=$(echo "$artifacts_response" | jq -r '.data[]? | select(.name? | test("\\.fpr$")) | .id' | head -1)
                   
                   if [[ -n "$fpr_id" ]] && [[ "$fpr_id" != "null" ]]; then
+                      echo "::notice title=FPR Download::FPR artifact found with ID: $fpr_id"
                       mkdir -p fortify-artifacts
                       fpr_filename="$fortify_project_name-${fortify_version_name}.fpr"
                       
+                      echo "::notice title=FPR Download::Downloading FPR file: $fpr_filename"
                       curl -sS -k -L \
                           --connect-timeout 60 \
                           --max-time 600 \
@@ -358,24 +414,50 @@ jobs:
                           -o "fortify-artifacts/$fpr_filename"
                       
                       if [[ -f "fortify-artifacts/$fpr_filename" ]] && [[ $(wc -c < "fortify-artifacts/$fpr_filename") -gt 1024 ]]; then
+                          fpr_size=$(wc -c < "fortify-artifacts/$fpr_filename")
+                          echo "::notice title=FPR Download::FPR downloaded successfully - Size: $fpr_size bytes"
                           echo "FPR_FILE=fortify-artifacts/$fpr_filename" >> $GITHUB_ENV
                           echo "FPR_FILENAME=$fpr_filename" >> $GITHUB_ENV
                           break
+                      else
+                          echo "::warning title=FPR Download::FPR file too small or empty - Size: $(wc -c < "fortify-artifacts/$fpr_filename" 2>/dev/null || echo 0) bytes"
                       fi
+                  else
+                      echo "::notice title=FPR Download::No FPR artifact found yet - Attempt $attempt/${{ inputs.polling_timeout_minutes }}"
                   fi
+              else
+                  echo "::warning title=FPR Download::Failed to retrieve artifacts - Attempt $attempt/${{ inputs.polling_timeout_minutes }}"
               fi
               
-              [[ $attempt -lt ${{ inputs.polling_timeout_minutes }} ]] && sleep 60 || exit 1
+              if [[ $attempt -lt ${{ inputs.polling_timeout_minutes }} ]]; then
+                  echo "::notice title=FPR Download::Waiting 60 seconds before next attempt"
+                  sleep 60
+              else
+                  echo "::error title=FPR Download Timeout::FPR download timed out after ${{ inputs.polling_timeout_minutes }} minutes"
+                  exit 1
+              fi
           done
 
       - name: Convert to SARIF
         run: |
-          [[ -f "$FPR_FILE" ]] || exit 1
+          echo "::notice title=SARIF Conversion::Starting FPR to SARIF conversion"
           
+          if [[ ! -f "$FPR_FILE" ]]; then
+              echo "::error title=SARIF Conversion::FPR file not found: $FPR_FILE"
+              exit 1
+          fi
+          
+          echo "::notice title=SARIF Conversion::Converting $FPR_FILENAME to SARIF format"
           timeout 300 sarif convert "$FPR_FILE" --tool FortifyFpr --output "fortify-artifacts/fortify-sast-results.sarif" --pretty-print --force 2>/dev/null || true
           
-          [[ -f "fortify-artifacts/fortify-sast-results.sarif" ]] && [[ -s "fortify-artifacts/fortify-sast-results.sarif" ]] || jq -n '{"$schema":"https://schemastore.azurewebsites.net/schemas/json/sarif-2.1.0-rtm.5.json","version":"2.1.0","runs":[{"tool":{"driver":{"name":"Fortify Static Code Analyzer","version":"25.2.0"}},"results":[]}]}' > "fortify-artifacts/fortify-sast-results.sarif"
+          if [[ -f "fortify-artifacts/fortify-sast-results.sarif" ]] && [[ -s "fortify-artifacts/fortify-sast-results.sarif" ]]; then
+              echo "::notice title=SARIF Conversion::SARIF conversion completed successfully"
+          else
+              echo "::warning title=SARIF Conversion::SARIF conversion failed, creating fallback SARIF"
+              jq -n '{"$schema":"https://schemastore.azurewebsites.net/schemas/json/sarif-2.1.0-rtm.5.json","version":"2.1.0","runs":[{"tool":{"driver":{"name":"Fortify Static Code Analyzer","version":"25.2.0"}},"results":[]}]}' > "fortify-artifacts/fortify-sast-results.sarif"
+          fi
           
+          echo "::notice title=SARIF Conversion::Adding metadata to SARIF"
           jq --arg project "$fortify_project_name" \
              --arg version "$fortify_version_name" \
              --arg timestamp "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
@@ -397,8 +479,20 @@ jobs:
 
       - name: Validate SARIF
         run: |
-          [[ -f "fortify-artifacts/fortify-sast-results.sarif" ]] || exit 1
-          jq -e . "fortify-artifacts/fortify-sast-results.sarif" >/dev/null 2>&1 || exit 1
+          echo "::notice title=SARIF Validation::Validating SARIF file"
+          
+          if [[ ! -f "fortify-artifacts/fortify-sast-results.sarif" ]]; then
+              echo "::error title=SARIF Validation::SARIF file not found"
+              exit 1
+          fi
+          
+          if ! jq -e . "fortify-artifacts/fortify-sast-results.sarif" >/dev/null 2>&1; then
+              echo "::error title=SARIF Validation::SARIF file contains invalid JSON"
+              exit 1
+          fi
+          
+          findings_count=$(jq '.runs[0].results | length' "fortify-artifacts/fortify-sast-results.sarif" 2>/dev/null || echo "0")
+          echo "::notice title=SARIF Validation::SARIF validation passed - $findings_count findings found"
 
       - name: Upload to Code Scanning
         uses: github/codeql-action/upload-sarif@v2

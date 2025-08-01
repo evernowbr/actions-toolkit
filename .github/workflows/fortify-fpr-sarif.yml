@@ -95,6 +95,8 @@ jobs:
           fortify_controller_token: ${{ secrets.FORTIFY_CONTROLLER_TOKEN }}
 
         run: |
+          echo "::notice title=Fortify Scan::Starting Fortify SAST scan execution"
+          echo "::notice title=Environment::Project: $fortify_project_name, Version: $fortify_version_name"
           echo "🔧 Configurando Fortify ScanCentral Client..."
           export PATH="/opt/Fortify_ScanCentral_Client_25.2.0_x64/bin:$PATH"
           echo "export PATH=\$PATH:/opt/Fortify_ScanCentral_Client_25.2.0_x64/bin" >> /home/github-runner/.bashrc
@@ -107,6 +109,9 @@ jobs:
             exit 1
           fi
           echo "::notice title=ScanCentral::scancentral configured and ready"
+          
+          echo "::notice title=API Setup::Configuring Fortify SSC API connection"
+          echo "::notice title=API Setup::SSC URL: $fortify_ssc_api_url"
           
           fortify_verificar_resposta_api() {
               local response="$1"
@@ -202,12 +207,15 @@ jobs:
           echo '/_/   \___//_/   \__//_//_/  \_, / /___//_/ |_|/___/  /_/     '
           echo '                            /___/                             '
           
+          echo "::notice title=Project Check::Checking if project $fortify_project_name exists in SSC"
           echo "🔍 Verificando se o projeto $fortify_project_name existe no SSC..."
           response=$(curl -sS -k -X GET --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/projectVersions?q=$fortify_project_name&fulltextsearch=true")
           exit_code=$?
           fortify_verificar_resposta_api "$response" "$exit_code"
+          echo "::notice title=API Response::Project check completed successfully"
           project_id=$(echo "$response" | jq '.data[] | select(.project.name=="'$fortify_project_name'") | .project.id' | head -1 | awk '{$1=$1};1')
           version_id=$(echo "$response" | jq '.data[] | select(.project.name=="'$fortify_project_name'") | select(.name=="'$fortify_version_name'") | .id' | awk '{$1=$1};1')
+          echo "::notice title=Project Status::Project ID: $project_id, Version ID: $version_id"
           
           if [[ "$version_id" != "" ]]; then
               echo "::notice title=Project Status::Project $fortify_project_name exists with ID $project_id"
@@ -224,6 +232,7 @@ jobs:
           fortify_configurar_projeto
           fortify_regras_processamento
           
+          echo "::notice title=Scan Preparation::All configuration completed, starting scancentral"
           echo "🔧 Executando Scancentral Client"
           echo "::notice title=Scan Execution::Starting Fortify SAST scan"
           scan_output=$(scancentral -ssctoken "$fortify_controller_token" -url "$fortify_controller_url" start -skipBuild -block --log-file fortify.log --overwrite -application "$fortify_project_name" -version "$fortify_version_name" --upload-to-ssc --ssc-upload-token "$fortify_controller_token" 2>&1 | tee /dev/stderr)

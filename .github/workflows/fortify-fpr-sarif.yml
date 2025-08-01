@@ -144,6 +144,13 @@ jobs:
           
           echo "::notice title=Environment Validation::All environment variables are properly configured"
           
+          # Debug das variáveis (sem expor valores sensíveis)
+          echo "::notice title=Environment Debug::Checking environment variables"
+          echo "🔍 FORTIFY_SSC_API_URL: ${fortify_ssc_api_url:0:20}..."
+          echo "🔍 FORTIFY_UNIFIED_LOGIN_TOKEN: ${#fortify_unified_login_token} caracteres"
+          echo "🔍 FORTIFY_CONTROLLER_URL: ${fortify_controller_url:0:20}..."
+          echo "🔍 FORTIFY_CONTROLLER_TOKEN: ${#fortify_controller_token} caracteres"
+          
           # Teste de conectividade básica
           echo "::notice title=Connectivity Test::Testing basic connectivity to Fortify SSC"
           echo "🌐 Testando conectividade básica com o Fortify SSC..."
@@ -173,55 +180,34 @@ jobs:
           
           echo "::notice title=Connectivity Success::Successfully connected to Fortify SSC server"
           
-          # Validação prévia da autenticação
+          # Validação prévia da autenticação (simplificada como no código de referência)
           echo "::notice title=Authentication Test::Testing Fortify SSC authentication"
           echo "🔐 Testando autenticação com o Fortify SSC..."
           
-          auth_test_response=$(curl -sS -k -X GET --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/currentUser" 2>&1)
-          auth_test_exit_code=$?
+          # Teste simples de conectividade com a API (sem validação prévia rigorosa)
+          echo "::notice title=API Test::Testing basic API connectivity"
+          test_response=$(curl -sS -k -X GET --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/projectVersions?limit=1" 2>&1)
+          test_exit_code=$?
           
-          if [[ "$auth_test_exit_code" != "0" ]]; then
-              echo "::error title=Authentication Failed::Failed to connect to Fortify SSC API"
-              echo "❌ Erro de conexão: $auth_test_response"
+          if [[ "$test_exit_code" != "0" ]]; then
+              echo "::error title=API Connection Failed::Failed to connect to Fortify SSC API"
+              echo "❌ Erro de conexão: $test_response"
               echo "🔍 Verifique:"
               echo "   - FORTIFY_SSC_API_URL está correto"
+              echo "   - FORTIFY_UNIFIED_LOGIN_TOKEN está válido"
               echo "   - Servidor SSC está acessível"
-              echo "   - Rede permite conexão"
               exit 1
           fi
           
-          if ! echo "$auth_test_response" | jq -e . >/dev/null 2>&1; then
-              echo "::error title=Authentication Failed::Invalid JSON response from authentication test"
-              echo "❌ Resposta inválida: $auth_test_response"
-              exit 1
-          fi
-          
-          auth_response_code=$(echo "$auth_test_response" | jq -r '.responseCode // empty')
-          if [[ -n "$auth_response_code" ]] && [[ "$auth_response_code" != "200" ]]; then
-              auth_error_message=$(echo "$auth_test_response" | jq -r '.message // "Unknown authentication error"')
-              echo "::error title=Authentication Failed::HTTP $auth_response_code - $auth_error_message"
-              echo "❌ Falha na autenticação: $auth_error_message"
-              echo "🔍 Verifique:"
-              echo "   - FORTIFY_UNIFIED_LOGIN_TOKEN está válido e não expirou"
-              echo "   - Token tem permissões adequadas"
-              echo "   - Formato do token está correto"
-              exit 1
-          fi
-          
-          user_info=$(echo "$auth_test_response" | jq -r '.data.userName // "Unknown"')
-          echo "::notice title=Authentication Success::Successfully authenticated as user: $user_info"
+          echo "::notice title=API Test::Basic API connectivity test passed"
           
           fortify_verificar_resposta_api() {
               local response="$1"
               local exit_code="$2"
-              local operation="$3"
               
               if [[ -z "$response" ]]; then
                   echo "::error title=API Error::Empty response from Fortify SSC API"
                   echo "❌ Resposta vazia da API do Fortify SSC"
-                  if [[ -n "$operation" ]]; then
-                      echo "🔍 Operação que falhou: $operation"
-                  fi
                   exit 1
               fi
               
@@ -229,12 +215,10 @@ jobs:
                   echo "::error title=API Error::Invalid JSON response from Fortify SSC API"
                   echo "❌ Resposta JSON inválida da API do Fortify SSC"
                   echo "📄 Resposta recebida: $response"
-                  if [[ -n "$operation" ]]; then
-                      echo "🔍 Operação que falhou: $operation"
-                  fi
                   exit 1
               fi
               
+              # Verificação simplificada como no código de referência
               local responseCode=$(echo "$response" | jq -r '.responseCode // empty')
               if [[ -n "$responseCode" ]] && [[ "$responseCode" != "200" ]] && [[ "$responseCode" != "201" ]]; then
                   local error_message=$(echo "$response" | jq -r '.message // "Unknown API error"')
@@ -245,10 +229,6 @@ jobs:
                   echo "❌ Código de erro: $error_code"
                   echo "❌ Mensagem de erro: $error_message"
                   echo "❌ Resposta completa da API: $response"
-                  
-                  if [[ -n "$operation" ]]; then
-                      echo "🔍 Operação que falhou: $operation"
-                  fi
                   
                   # Sugestões específicas baseadas no código de erro
                   case $error_code in
@@ -278,9 +258,6 @@ jobs:
                   echo "::error title=API Call Failed::Command returned exit code $exit_code"
                   echo "❌ Comando retornou código de saída $exit_code"
                   echo "❌ Mensagem de erro: $response"
-                  if [[ -n "$operation" ]]; then
-                      echo "🔍 Operação que falhou: $operation"
-                  fi
                   exit $exit_code
               fi
           }

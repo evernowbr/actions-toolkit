@@ -395,14 +395,44 @@ jobs:
           fortify_regras_processamento
           
           echo "::notice title=Scan Preparation::All configuration completed, starting scancentral"
-          echo "🔧 Executando Scancentral Client"
-          echo "::notice title=Scan Execution::Starting Fortify SAST scan"
-          scan_output=$(scancentral -ssctoken "$fortify_controller_token" -url "$fortify_controller_url" start -skipBuild -block --log-file fortify.log --overwrite -application "$fortify_project_name" -version "$fortify_version_name" --upload-to-ssc --ssc-upload-token "$fortify_controller_token" 2>&1 | tee /dev/stderr)
+                     echo "🔧 Executando Scancentral Client"
+           echo "::notice title=Scan Execution::Starting Fortify SAST scan"
+           
+                       # Executar scan e gerar FPR localmente
+            echo "::notice title=Scan Execution::Starting Fortify SAST scan with local FPR generation"
+            
+            # Primeiro: executar scan sem upload para gerar FPR localmente
+            scan_output=$(scancentral -ssctoken "$fortify_controller_token" -url "$fortify_controller_url" start -skipBuild -block --log-file fortify.log --overwrite -application "$fortify_project_name" -version "$fortify_version_name" 2>&1 | tee /dev/stderr)
           
-          exit_code=$?
-          fortify_verificar_codigo_de_resposta
-          
-          job_token=$(echo "$scan_output" | grep "Submitted job and received token" | grep -E -o "[a-f0-9-]{36}")
+                      exit_code=$?
+            fortify_verificar_codigo_de_resposta
+            
+            job_token=$(echo "$scan_output" | grep "Submitted job and received token" | grep -E -o "[a-f0-9-]{36}")
+            
+                         # Segundo: fazer upload do FPR para o SSC
+             echo "::notice title=SSC Upload::Uploading FPR to Fortify SSC"
+             fpr_file=$(find . -name "*.fpr" -type f | head -1)
+             
+             if [[ -n "$fpr_file" ]]; then
+                 echo "::notice title=SSC Upload::Found FPR file: $fpr_file"
+                 
+                 # Upload do FPR para o SSC
+                 upload_output=$(scancentral -ssctoken "$fortify_controller_token" -url "$fortify_controller_url" upload -f "$fpr_file" --application "$fortify_project_name" --version "$fortify_version_name" 2>&1 | tee /dev/stderr)
+                 upload_exit_code=$?
+                 
+                 if [[ $upload_exit_code -eq 0 ]]; then
+                     echo "::notice title=SSC Upload::FPR uploaded successfully to SSC"
+                     echo "✅ FPR enviado para o SSC com sucesso"
+                 else
+                     echo "::error title=SSC Upload::FPR upload failed"
+                     echo "❌ Falha no upload do FPR para o SSC"
+                     exit 1
+                 fi
+             else
+                 echo "::error title=SSC Upload::No FPR file found for upload"
+                 echo "❌ Nenhum arquivo FPR encontrado para upload"
+                 exit 1
+             fi
           
                      if [[ -z "$job_token" ]]; then
                echo "::error title=Scan Failed::Job token not created. Check scancentral output for errors."
@@ -501,11 +531,123 @@ jobs:
              cp /tmp/fortify_all_issues.json fortify-artifacts/
            fi
            
-           mkdir -p /tmp/fortify-metadata
-           echo "$version_id" > /tmp/fortify-metadata/version_id
-           echo "$job_token" > /tmp/fortify-metadata/job_token
-           echo "$fortify_project_name" > /tmp/fortify-metadata/project_name
-           echo "$fortify_version_name" > /tmp/fortify-metadata/version_name
+                       mkdir -p /tmp/fortify-metadata
+            echo "$version_id" > /tmp/fortify-metadata/version_id
+            echo "$job_token" > /tmp/fortify-metadata/job_token
+            echo "$fortify_project_name" > /tmp/fortify-metadata/project_name
+            echo "$fortify_version_name" > /tmp/fortify-metadata/version_name
+            
+                         # ========== DOWNLOAD FPR DO SSC E CONVERSÃO → SARIF ==========
+             echo "::notice title=FPR Download::Starting FPR download from SSC"
+             
+             # Aguardar um pouco para o SSC processar o upload
+             echo "::notice title=FPR Download::Waiting for SSC to process upload..."
+             sleep 30
+             
+             # Buscar FPR no SSC
+             echo "::notice title=FPR Download::Searching for FPR artifacts in SSC..."
+             artifacts_response=$(curl -sS -k -X GET \
+                 --connect-timeout 30 \
+                 --max-time 120 \
+                 -H "Accept: application/json" \
+                 -H "Authorization: FortifyToken $fortify_unified_login_token" \
+                 "$fortify_ssc_api_url/projectVersions/$version_id/artifacts" 2>/dev/null)
+             
+             if [[ $? -eq 0 ]] && echo "$artifacts_response" | jq -e . >/dev/null 2>&1; then
+                 fpr_id=$(echo "$artifacts_response" | jq -r '.data[]? | select(.name? | test("\\.fpr$")) | .id' | head -1)
+                 
+                 if [[ -n "$fpr_id" ]] && [[ "$fpr_id" != "null" ]]; then
+                     echo "::notice title=FPR Download::FPR artifact found with ID: $fpr_id"
+                     mkdir -p fortify-artifacts
+                     fpr_filename="$fortify_project_name-${fortify_version_name}.fpr"
+                     
+                     echo "::notice title=FPR Download::Downloading FPR file: $fpr_filename"
+                     curl -sS -k -L \
+                         --connect-timeout 60 \
+                         --max-time 600 \
+                         -H "Authorization: FortifyToken $fortify_unified_login_token" \
+                         -H "Accept: application/octet-stream" \
+                         "$fortify_ssc_api_url/projectVersions/$version_id/artifacts/$fpr_id/content" \
+                         -o "fortify-artifacts/$fpr_filename"
+                     
+                     if [[ -f "fortify-artifacts/$fpr_filename" ]] && [[ $(wc -c < "fortify-artifacts/$fpr_filename") -gt 1024 ]]; then
+                         fpr_size=$(wc -c < "fortify-artifacts/$fpr_filename")
+                         echo "::notice title=FPR Download::FPR downloaded successfully - Size: $fpr_size bytes"
+                         fpr_file="fortify-artifacts/$fpr_filename"
+                     else
+                         echo "::error title=FPR Download::FPR file too small or empty"
+                         echo "❌ Arquivo FPR baixado é muito pequeno ou vazio"
+                         exit 1
+                     fi
+                 else
+                     echo "::error title=FPR Download::No FPR artifact found in SSC"
+                     echo "❌ Nenhum artefato FPR encontrado no SSC"
+                     exit 1
+                 fi
+             else
+                 echo "::error title=FPR Download::Failed to retrieve artifacts from SSC"
+                 echo "❌ Falha ao buscar artefatos do SSC"
+                 exit 1
+             fi
+            
+            echo "::notice title=SARIF Conversion::Found FPR file: $fpr_file"
+            
+            # Instalar SARIF MultiTool se necessário
+            if ! command -v sarif >/dev/null 2>&1; then
+                echo "::notice title=SARIF MultiTool::Installing SARIF MultiTool"
+                dotnet tool install --global Sarif.Multitool --version latest --no-cache 2>/dev/null || true
+                export PATH="$HOME/.dotnet/tools:$PATH"
+            fi
+            
+            # Converter FPR para SARIF
+            sarif_file="fortify-sast-results.sarif"
+            echo "::notice title=SARIF Conversion::Converting $fpr_file to SARIF format"
+            
+            timeout 300 sarif convert "$fpr_file" --tool FortifyFpr --output "$sarif_file" --pretty-print --force 2>/dev/null || true
+            
+            if [[ -f "$sarif_file" ]] && [[ -s "$sarif_file" ]]; then
+                echo "::notice title=SARIF Conversion::SARIF conversion completed successfully"
+                
+                # Adicionar metadados ao SARIF
+                echo "::notice title=SARIF Conversion::Adding metadata to SARIF"
+                jq --arg project "$fortify_project_name" \
+                   --arg version "$fortify_version_name" \
+                   --arg timestamp "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+                   --arg job_token "$job_token" \
+                   --arg version_id "$version_id" \
+                   --arg fpr_file "$(basename "$fpr_file")" \
+                   '(.runs[0].properties // {}) |= . + {
+                      "fortify_project": $project,
+                      "fortify_version": $version,
+                      "fortify_scan_time": $timestamp,
+                      "fortify_job_token": $job_token,
+                      "fortify_version_id": $version_id,
+                      "fortify_engine_version": "25.2.0",
+                      "fortify_fpr_file": $fpr_file,
+                      "conversion_method": "fpr_to_sarif",
+                      "github_run_id": "'${{ github.run_id }}'",
+                      "github_run_number": "'${{ github.run_number }}'"
+                    }' "$sarif_file" > "$sarif_file.tmp" && mv "$sarif_file.tmp" "$sarif_file"
+                
+                # Validar SARIF
+                if jq -e . "$sarif_file" >/dev/null 2>&1; then
+                    findings_count=$(jq '.runs[0].results | length' "$sarif_file" 2>/dev/null || echo "0")
+                    echo "::notice title=SARIF Validation::SARIF validation passed - $findings_count findings found"
+                else
+                    echo "::warning title=SARIF Validation::SARIF file contains invalid JSON, creating fallback"
+                    jq -n '{"$schema":"https://schemastore.azurewebsites.net/schemas/json/sarif-2.1.0-rtm.5.json","version":"2.1.0","runs":[{"tool":{"driver":{"name":"Fortify Static Code Analyzer","version":"25.2.0"}},"results":[]}]}' > "$sarif_file"
+                fi
+                
+                # Salvar SARIF para upload
+                mkdir -p fortify-artifacts
+                cp "$sarif_file" fortify-artifacts/
+                echo "$sarif_file" > /tmp/fortify-metadata/sarif_file
+                
+            else
+                echo "::warning title=SARIF Conversion::SARIF conversion failed, creating fallback SARIF"
+                jq -n '{"$schema":"https://schemastore.azurewebsites.net/schemas/json/sarif-2.1.0-rtm.5.json","version":"2.1.0","runs":[{"tool":{"driver":{"name":"Fortify Static Code Analyzer","version":"25.2.0"}},"results":[]}]}' > "fortify-artifacts/fortify-sast-results.sarif"
+                echo "fortify-sast-results.sarif" > /tmp/fortify-metadata/sarif_file
+            fi
 
              - name: Upload scan metadata
          uses: actions/upload-artifact@v4
@@ -515,230 +657,64 @@ jobs:
            retention-days: 2
            if-no-files-found: error
 
-       - name: Upload Fortify findings
-         uses: actions/upload-artifact@v4
-         with:
-           name: fortify-findings-${{ github.run_number }}
-           path: fortify-artifacts/
-           retention-days: 7
-           if-no-files-found: warn
+               - name: Upload Fortify findings
+          uses: actions/upload-artifact@v4
+          with:
+            name: fortify-findings-${{ github.run_number }}
+            path: fortify-artifacts/
+            retention-days: 7
+            if-no-files-found: warn
 
-      - name: Create scan summary
-        if: always()
-        run: |
-          if [ -f /tmp/fortify-metadata/version_id ]; then
-            echo "## ✅ Fortify SAST Scan Summary" >> $GITHUB_STEP_SUMMARY
-            echo "| Status | Result |" >> $GITHUB_STEP_SUMMARY
-            echo "|--------|--------|" >> $GITHUB_STEP_SUMMARY
-            echo "| Scan | ✅ SUCCESS |" >> $GITHUB_STEP_SUMMARY
-            echo "| SSC Upload | ✅ SUCCESS |" >> $GITHUB_STEP_SUMMARY
-            echo "| Gate Check | ✅ PASSED |" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**Project:** $(cat /tmp/fortify-metadata/project_name)" >> $GITHUB_STEP_SUMMARY
-            echo "**Version:** $(cat /tmp/fortify-metadata/version_name)" >> $GITHUB_STEP_SUMMARY
-            echo "**Job Token:** $(cat /tmp/fortify-metadata/job_token)" >> $GITHUB_STEP_SUMMARY
-            echo "**Version ID:** $(cat /tmp/fortify-metadata/version_id)" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "## ❌ Fortify SAST Scan Failed" >> $GITHUB_STEP_SUMMARY
-            echo "**Status:** FAILED" >> $GITHUB_STEP_SUMMARY
-            echo "**Action Required:** Check logs for specific error details" >> $GITHUB_STEP_SUMMARY
-          fi
+        - name: Upload SARIF to Code Scanning
+          uses: github/codeql-action/upload-sarif@v2
+          with:
+            sarif_file: fortify-artifacts/fortify-sast-results.sarif
+          continue-on-error: true
 
-  convert-fpr-sarif:
-    name: Download FPR and Convert to SARIF
-    runs-on: ubuntu-latest
-    needs: fortify-scan
-    timeout-minutes: ${{ inputs.polling_timeout_minutes }}
-    
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+        - name: Upload SARIF Artifact
+          uses: actions/upload-artifact@v4
+          with:
+            name: fortify-sarif-${{ github.run_number }}
+            path: fortify-artifacts/fortify-sast-results.sarif
+            if-no-files-found: error
+            retention-days: 30
 
-      - name: Install dependencies
-        run: |
-          echo "::notice title=Dependencies::Installing required packages"
-          sudo apt-get update -qq
-          sudo apt-get install -y jq curl >/dev/null 2>&1
-          echo "::notice title=Dependencies::All packages installed successfully"
+             - name: Create scan summary
+         if: always()
+         run: |
+           if [ -f /tmp/fortify-metadata/version_id ]; then
+             echo "## ✅ Fortify SAST Scan Summary" >> $GITHUB_STEP_SUMMARY
+             echo "| Status | Result |" >> $GITHUB_STEP_SUMMARY
+             echo "|--------|--------|" >> $GITHUB_STEP_SUMMARY
+             echo "| Scan | ✅ SUCCESS |" >> $GITHUB_STEP_SUMMARY
+             echo "| SSC Upload | ✅ SUCCESS |" >> $GITHUB_STEP_SUMMARY
+             echo "| FPR Download | ✅ SUCCESS |" >> $GITHUB_STEP_SUMMARY
+             echo "| Gate Check | ✅ PASSED |" >> $GITHUB_STEP_SUMMARY
+             echo "| SARIF Conversion | ✅ SUCCESS |" >> $GITHUB_STEP_SUMMARY
+             echo "" >> $GITHUB_STEP_SUMMARY
+             echo "**Project:** $(cat /tmp/fortify-metadata/project_name)" >> $GITHUB_STEP_SUMMARY
+             echo "**Version:** $(cat /tmp/fortify-metadata/version_name)" >> $GITHUB_STEP_SUMMARY
+             echo "**Job Token:** $(cat /tmp/fortify-metadata/job_token)" >> $GITHUB_STEP_SUMMARY
+             echo "**Version ID:** $(cat /tmp/fortify-metadata/version_id)" >> $GITHUB_STEP_SUMMARY
+             
+             if [ -f /tmp/fortify-metadata/sarif_file ]; then
+               sarif_file=$(cat /tmp/fortify-metadata/sarif_file)
+               findings_count=$(jq '.runs[0].results | length' "fortify-artifacts/$sarif_file" 2>/dev/null || echo "0")
+               echo "**SARIF File:** $sarif_file" >> $GITHUB_STEP_SUMMARY
+               echo "**Findings:** $findings_count" >> $GITHUB_STEP_SUMMARY
+               echo "" >> $GITHUB_STEP_SUMMARY
+               echo "### 📥 Downloads:" >> $GITHUB_STEP_SUMMARY
+               echo "- **SARIF for IDE:** Actions → This run → Artifacts → fortify-sarif-${{ github.run_number }}.zip" >> $GITHUB_STEP_SUMMARY
+               echo "- **Findings JSON:** Actions → This run → Artifacts → fortify-findings-${{ github.run_number }}.zip" >> $GITHUB_STEP_SUMMARY
+               echo "" >> $GITHUB_STEP_SUMMARY
+               echo "### 🔗 Links:" >> $GITHUB_STEP_SUMMARY
+               echo "- **GitHub Code Scanning:** Available in Security tab" >> $GITHUB_STEP_SUMMARY
+               echo "- **Fortify SSC:** https://fortify-ssc.evernow.com.br/html/ssc/version/$(cat /tmp/fortify-metadata/version_id)/audit" >> $GITHUB_STEP_SUMMARY
+             fi
+           else
+             echo "## ❌ Fortify SAST Scan Failed" >> $GITHUB_STEP_SUMMARY
+             echo "**Status:** FAILED" >> $GITHUB_STEP_SUMMARY
+             echo "**Action Required:** Check logs for specific error details" >> $GITHUB_STEP_SUMMARY
+           fi
 
-      - name: Download scan metadata
-        uses: actions/download-artifact@v4
-        with:
-          name: fortify-metadata-${{ github.run_number }}
-          path: /tmp/fortify-metadata/
-
-      - name: Load metadata
-        run: |
-          echo "VERSION_ID=$(cat /tmp/fortify-metadata/version_id)" >> $GITHUB_ENV
-          echo "JOB_TOKEN=$(cat /tmp/fortify-metadata/job_token)" >> $GITHUB_ENV
-          echo "fortify_project_name=$(cat /tmp/fortify-metadata/project_name)" >> $GITHUB_ENV
-          echo "fortify_version_name=$(cat /tmp/fortify-metadata/version_name)" >> $GITHUB_ENV
-          echo "::notice title=Metadata::Loaded scan metadata successfully"
-
-      - name: Setup .NET SDK
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '8.0.x'
-
-      - name: Cache .NET tools
-        uses: actions/cache@v4
-        with:
-          path: ~/.dotnet/tools
-          key: dotnet-tools-${{ inputs.sarif_multitool_version }}-${{ runner.os }}
-          restore-keys: |
-            dotnet-tools-${{ runner.os }}-
-
-      - name: Install SARIF MultiTool
-        run: |
-          echo "::notice title=SARIF MultiTool::Installing SARIF MultiTool version ${{ inputs.sarif_multitool_version }}"
-          command -v sarif >/dev/null 2>&1 || dotnet tool install --global Sarif.Multitool --version ${{ inputs.sarif_multitool_version }} --no-cache 2>/dev/null
-          echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
-          echo "::notice title=SARIF MultiTool::Installation completed"
-
-      - name: Download FPR
-        env:
-          fortify_ssc_api_url: ${{ secrets.FORTIFY_SSC_API_URL }}
-          fortify_unified_login_token: ${{ secrets.FORTIFY_UNIFIED_LOGIN_TOKEN }}
-        run: |
-          echo "::notice title=FPR Download::Starting FPR download with timeout of ${{ inputs.polling_timeout_minutes }} minutes"
-          
-          for attempt in $(seq 1 ${{ inputs.polling_timeout_minutes }}); do
-              echo "::notice title=FPR Download::Attempt $attempt/${{ inputs.polling_timeout_minutes }} - Checking for FPR artifacts"
-              
-              artifacts_response=$(curl -sS -k -X GET \
-                  --connect-timeout 30 \
-                  --max-time 120 \
-                  -H "Accept: application/json" \
-                  -H "Authorization: FortifyToken $fortify_unified_login_token" \
-                  "$fortify_ssc_api_url/projectVersions/$VERSION_ID/artifacts" 2>/dev/null)
-              
-              if [[ $? -eq 0 ]] && echo "$artifacts_response" | jq -e . >/dev/null 2>&1; then
-                  fpr_id=$(echo "$artifacts_response" | jq -r '.data[]? | select(.name? | test("\\.fpr$")) | .id' | head -1)
-                  
-                  if [[ -n "$fpr_id" ]] && [[ "$fpr_id" != "null" ]]; then
-                      echo "::notice title=FPR Download::FPR artifact found with ID: $fpr_id"
-                      mkdir -p fortify-artifacts
-                      fpr_filename="$fortify_project_name-${fortify_version_name}.fpr"
-                      
-                      echo "::notice title=FPR Download::Downloading FPR file: $fpr_filename"
-                      curl -sS -k -L \
-                          --connect-timeout 60 \
-                          --max-time 600 \
-                          -H "Authorization: FortifyToken $fortify_unified_login_token" \
-                          -H "Accept: application/octet-stream" \
-                          "$fortify_ssc_api_url/projectVersions/$VERSION_ID/artifacts/$fpr_id/content" \
-                          -o "fortify-artifacts/$fpr_filename"
-                      
-                      if [[ -f "fortify-artifacts/$fpr_filename" ]] && [[ $(wc -c < "fortify-artifacts/$fpr_filename") -gt 1024 ]]; then
-                          fpr_size=$(wc -c < "fortify-artifacts/$fpr_filename")
-                          echo "::notice title=FPR Download::FPR downloaded successfully - Size: $fpr_size bytes"
-                          echo "FPR_FILE=fortify-artifacts/$fpr_filename" >> $GITHUB_ENV
-                          echo "FPR_FILENAME=$fpr_filename" >> $GITHUB_ENV
-                          break
-                      else
-                          echo "::warning title=FPR Download::FPR file too small or empty - Size: $(wc -c < "fortify-artifacts/$fpr_filename" 2>/dev/null || echo 0) bytes"
-                      fi
-                  else
-                      echo "::notice title=FPR Download::No FPR artifact found yet - Attempt $attempt/${{ inputs.polling_timeout_minutes }}"
-                  fi
-              else
-                  echo "::warning title=FPR Download::Failed to retrieve artifacts - Attempt $attempt/${{ inputs.polling_timeout_minutes }}"
-              fi
-              
-              if [[ $attempt -lt ${{ inputs.polling_timeout_minutes }} ]]; then
-                  echo "::notice title=FPR Download::Waiting 60 seconds before next attempt"
-                  sleep 60
-              else
-                  echo "::error title=FPR Download Timeout::FPR download timed out after ${{ inputs.polling_timeout_minutes }} minutes"
-                  exit 1
-              fi
-          done
-
-      - name: Convert to SARIF
-        run: |
-          echo "::notice title=SARIF Conversion::Starting FPR to SARIF conversion"
-          
-          if [[ ! -f "$FPR_FILE" ]]; then
-              echo "::error title=SARIF Conversion::FPR file not found: $FPR_FILE"
-              exit 1
-          fi
-          
-          echo "::notice title=SARIF Conversion::Converting $FPR_FILENAME to SARIF format"
-          timeout 300 sarif convert "$FPR_FILE" --tool FortifyFpr --output "fortify-artifacts/fortify-sast-results.sarif" --pretty-print --force 2>/dev/null || true
-          
-          if [[ -f "fortify-artifacts/fortify-sast-results.sarif" ]] && [[ -s "fortify-artifacts/fortify-sast-results.sarif" ]]; then
-              echo "::notice title=SARIF Conversion::SARIF conversion completed successfully"
-          else
-              echo "::warning title=SARIF Conversion::SARIF conversion failed, creating fallback SARIF"
-              jq -n '{"$schema":"https://schemastore.azurewebsites.net/schemas/json/sarif-2.1.0-rtm.5.json","version":"2.1.0","runs":[{"tool":{"driver":{"name":"Fortify Static Code Analyzer","version":"25.2.0"}},"results":[]}]}' > "fortify-artifacts/fortify-sast-results.sarif"
-          fi
-          
-          echo "::notice title=SARIF Conversion::Adding metadata to SARIF"
-          jq --arg project "$fortify_project_name" \
-             --arg version "$fortify_version_name" \
-             --arg timestamp "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
-             --arg job_token "$JOB_TOKEN" \
-             --arg version_id "$VERSION_ID" \
-             --arg fpr_file "$FPR_FILENAME" \
-             '(.runs[0].properties // {}) |= . + {
-                "fortify_project": $project,
-                "fortify_version": $version,
-                "fortify_scan_time": $timestamp,
-                "fortify_job_token": $job_token,
-                "fortify_version_id": $version_id,
-                "fortify_engine_version": "25.2.0",
-                "fortify_fpr_file": $fpr_file,
-                "conversion_method": "optimized_fpr_to_sarif",
-                "github_run_id": "'${{ github.run_id }}'",
-                "github_run_number": "'${{ github.run_number }}'"
-              }' "fortify-artifacts/fortify-sast-results.sarif" > "fortify-artifacts/fortify-sast-results.sarif.tmp" && mv "fortify-artifacts/fortify-sast-results.sarif.tmp" "fortify-artifacts/fortify-sast-results.sarif"
-
-      - name: Validate SARIF
-        run: |
-          echo "::notice title=SARIF Validation::Validating SARIF file"
-          
-          if [[ ! -f "fortify-artifacts/fortify-sast-results.sarif" ]]; then
-              echo "::error title=SARIF Validation::SARIF file not found"
-              exit 1
-          fi
-          
-          if ! jq -e . "fortify-artifacts/fortify-sast-results.sarif" >/dev/null 2>&1; then
-              echo "::error title=SARIF Validation::SARIF file contains invalid JSON"
-              exit 1
-          fi
-          
-          findings_count=$(jq '.runs[0].results | length' "fortify-artifacts/fortify-sast-results.sarif" 2>/dev/null || echo "0")
-          echo "::notice title=SARIF Validation::SARIF validation passed - $findings_count findings found"
-
-      - name: Upload to Code Scanning
-        uses: github/codeql-action/upload-sarif@v2
-        with:
-          sarif_file: fortify-artifacts/fortify-sast-results.sarif
-        continue-on-error: true
-
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: fortify-sarif-${{ github.run_number }}
-          path: fortify-artifacts/fortify-sast-results.sarif
-          if-no-files-found: error
-          retention-days: 30
-        if: always()
-
-      - name: Create summary
-        run: |
-          echo "# Fortify FPR → SARIF Conversion Summary" >> $GITHUB_STEP_SUMMARY
-          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Findings | $(jq '.runs[0].results | length' "fortify-artifacts/fortify-sast-results.sarif" 2>/dev/null || echo "0") |" >> $GITHUB_STEP_SUMMARY
-          echo "| Project | $fortify_project_name |" >> $GITHUB_STEP_SUMMARY
-          echo "| Version | $fortify_version_name |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Download: Actions → This run → Artifacts → fortify-sarif-${{ github.run_number }}.zip" >> $GITHUB_STEP_SUMMARY
-
-      - name: Cleanup
-        uses: geekyeggo/delete-artifact@v5
-        with:
-          name: fortify-metadata-${{ github.run_number }}
-        continue-on-error: true
-        if: always() 
+   

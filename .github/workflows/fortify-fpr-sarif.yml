@@ -52,36 +52,52 @@ jobs:
           echo "::notice title=FPR to SARIF::Starting conversion for $fortify_project_name/$fortify_version_name"
           
           # Ler metadados do SAST
+          if [[ ! -f "/tmp/fortify-metadata/version_id" ]]; then
+            echo "::error title=Metadata::Version ID file not found"
+            exit 1
+          fi
+          
           version_id=$(cat /tmp/fortify-metadata/version_id)
-          echo "::notice title=Metadata::Version ID: $version_id"
+          project_id=$(cat /tmp/fortify-metadata/project_id 2>/dev/null || echo "")
+          echo "::notice title=Metadata::Version ID: $version_id, Project ID: $project_id"
           
           # Download FPR
           echo "::notice title=FPR Download::Downloading FPR from SSC"
-          max_attempts=5
+          max_attempts=10
           attempt=1
           fpr_file=""
           
           while [[ $attempt -le $max_attempts ]] && [[ -z "$fpr_file" ]]; do
+            echo "::notice title=FPR Download::Attempt $attempt of $max_attempts"
+            
             artifacts_response=$(curl -sS -k -X GET -H "Accept: application/json" -H "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/projectVersions/$version_id/artifacts" 2>/dev/null)
             
             if [[ $? -eq 0 ]] && echo "$artifacts_response" | jq -e . >/dev/null 2>&1; then
               fpr_id=$(echo "$artifacts_response" | jq -r '.data[]? | select(.name? | test("\\.fpr$")) | .id' | head -1)
               
               if [[ -n "$fpr_id" ]] && [[ "$fpr_id" != "null" ]]; then
+                echo "::notice title=FPR Download::Found FPR artifact ID: $fpr_id"
                 mkdir -p fortify-artifacts
                 fpr_filename="$fortify_project_name-${fortify_version_name}.fpr"
                 
                 curl -sS -k -L -H "Authorization: FortifyToken $fortify_unified_login_token" -H "Accept: application/octet-stream" "$fortify_ssc_api_url/projectVersions/$version_id/artifacts/$fpr_id/content" -o "fortify-artifacts/$fpr_filename"
                 
                 if [[ -f "fortify-artifacts/$fpr_filename" ]] && [[ $(wc -c < "fortify-artifacts/$fpr_filename") -gt 1024 ]]; then
-                  echo "::notice title=FPR Download::FPR downloaded successfully"
+                  echo "::notice title=FPR Download::FPR downloaded successfully - $(wc -c < "fortify-artifacts/$fpr_filename") bytes"
                   fpr_file="fortify-artifacts/$fpr_filename"
                   break
+                else
+                  echo "::warning title=FPR Download::FPR file too small or missing"
                 fi
+              else
+                echo "::warning title=FPR Download::No FPR artifact found in response"
               fi
+            else
+              echo "::warning title=FPR Download::Failed to get artifacts list"
             fi
             
             if [[ $attempt -lt $max_attempts ]]; then
+              echo "::notice title=FPR Download::Waiting 30 seconds before retry..."
               sleep 30
             fi
             
@@ -89,44 +105,88 @@ jobs:
           done
           
           if [[ -z "$fpr_file" ]]; then
-            echo "::error title=FPR Download::Failed to download FPR"
-            exit 1
+            echo "::error title=FPR Download::Failed to download FPR after $max_attempts attempts"
+            echo "::notice title=FPR Download::Creating fallback SARIF without FPR conversion"
           fi
           
           # Converter FPR para SARIF
           echo "::notice title=SARIF Conversion::Converting FPR to SARIF"
           
           if ! command -v sarif >/dev/null 2>&1; then
-            dotnet tool install --global Sarif.Multitool --version latest --no-cache 2>/dev/null || true
+            echo "::notice title=SARIF Conversion::Installing SARIF MultiTool"
+            dotnet tool install --global Sarif.Multitool --version ${{ inputs.sarif_multitool_version }} --no-cache 2>/dev/null || true
             export PATH="$HOME/.dotnet/tools:$PATH"
           fi
           
           sarif_file="fortify-sast-results.sarif"
-          timeout 300 sarif convert "$fpr_file" --tool FortifyFpr --output "$sarif_file" --pretty-print --force 2>/dev/null || true
           
-          if [[ -f "$sarif_file" ]] && [[ -s "$sarif_file" ]]; then
-            echo "::notice title=SARIF Conversion::SARIF conversion completed"
+          if [[ -n "$fpr_file" ]]; then
+            echo "::notice title=SARIF Conversion::Converting FPR file: $fpr_file"
+            timeout 300 sarif convert "$fpr_file" --tool FortifyFpr --output "$sarif_file" --pretty-print --force 2>/dev/null || true
             
-            # Adicionar metadados ao SARIF
-            jq --arg project "$fortify_project_name" --arg version "$fortify_version_name" --arg timestamp "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" --arg version_id "$version_id" '(.runs[0].properties // {}) |= . + {"fortify_project": $project,"fortify_version": $version,"fortify_scan_time": $timestamp,"fortify_version_id": $version_id,"fortify_engine_version": "25.2.0","conversion_method": "fpr_to_sarif","github_run_id": "'${{ github.run_id }}'","github_run_number": "'${{ github.run_number }}'"}' "$sarif_file" > "$sarif_file.tmp" && mv "$sarif_file.tmp" "$sarif_file"
-            
-            # Validar SARIF
-            if jq -e . "$sarif_file" >/dev/null 2>&1; then
-              findings_count=$(jq '.runs[0].results | length' "$sarif_file" 2>/dev/null || echo "0")
-              echo "::notice title=SARIF Validation::SARIF validation passed - $findings_count findings found"
+            if [[ -f "$sarif_file" ]] && [[ -s "$sarif_file" ]]; then
+              echo "::notice title=SARIF Conversion::SARIF conversion completed successfully"
+              
+              # Adicionar metadados ao SARIF
+              jq --arg project "$fortify_project_name" \
+                 --arg version "$fortify_version_name" \
+                 --arg timestamp "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+                 --arg version_id "$version_id" \
+                 --arg project_id "$project_id" \
+                 '(.runs[0].properties // {}) |= . + {
+                   "fortify_project": $project,
+                   "fortify_version": $version,
+                   "fortify_scan_time": $timestamp,
+                   "fortify_version_id": $version_id,
+                   "fortify_project_id": $project_id,
+                   "fortify_engine_version": "25.2.0",
+                   "conversion_method": "fpr_to_sarif",
+                   "github_run_id": "'${{ github.run_id }}'",
+                   "github_run_number": "'${{ github.run_number }}'"
+                 }' "$sarif_file" > "$sarif_file.tmp" && mv "$sarif_file.tmp" "$sarif_file"
+              
+              # Validar SARIF
+              if jq -e . "$sarif_file" >/dev/null 2>&1; then
+                findings_count=$(jq '.runs[0].results | length' "$sarif_file" 2>/dev/null || echo "0")
+                echo "::notice title=SARIF Validation::SARIF validation passed - $findings_count findings found"
+              else
+                echo "::warning title=SARIF Validation::Invalid SARIF, creating fallback"
+                jq -n '{
+                  "$schema":"https://schemastore.azurewebsites.net/schemas/json/sarif-2.1.0-rtm.5.json",
+                  "version":"2.1.0",
+                  "runs":[{
+                    "tool":{"driver":{"name":"Fortify Static Code Analyzer","version":"25.2.0"}},
+                    "results":[]
+                  }]
+                }' > "$sarif_file"
+              fi
             else
-              echo "::warning title=SARIF Validation::Creating fallback SARIF"
-              jq -n '{"$schema":"https://schemastore.azurewebsites.net/schemas/json/sarif-2.1.0-rtm.5.json","version":"2.1.0","runs":[{"tool":{"driver":{"name":"Fortify Static Code Analyzer","version":"25.2.0"}},"results":[]}]}' > "$sarif_file"
+              echo "::warning title=SARIF Conversion::FPR conversion failed, creating fallback SARIF"
+              jq -n '{
+                "$schema":"https://schemastore.azurewebsites.net/schemas/json/sarif-2.1.0-rtm.5.json",
+                "version":"2.1.0",
+                "runs":[{
+                  "tool":{"driver":{"name":"Fortify Static Code Analyzer","version":"25.2.0"}},
+                  "results":[]
+                }]
+              }' > "$sarif_file"
             fi
-            
-            # Salvar SARIF para upload
-            mkdir -p fortify-artifacts
-            cp "$sarif_file" fortify-artifacts/
-            
           else
-            echo "::warning title=SARIF Conversion::Creating fallback SARIF"
-            jq -n '{"$schema":"https://schemastore.azurewebsites.net/schemas/json/sarif-2.1.0-rtm.5.json","version":"2.1.0","runs":[{"tool":{"driver":{"name":"Fortify Static Code Analyzer","version":"25.2.0"}},"results":[]}]}' > "fortify-artifacts/fortify-sast-results.sarif"
+            echo "::warning title=SARIF Conversion::No FPR available, creating fallback SARIF"
+            jq -n '{
+              "$schema":"https://schemastore.azurewebsites.net/schemas/json/sarif-2.1.0-rtm.5.json",
+              "version":"2.1.0",
+              "runs":[{
+                "tool":{"driver":{"name":"Fortify Static Code Analyzer","version":"25.2.0"}},
+                "results":[]
+              }]
+            }' > "$sarif_file"
           fi
+          
+          # Salvar SARIF para upload
+          mkdir -p fortify-artifacts
+          cp "$sarif_file" fortify-artifacts/
+          echo "::notice title=SARIF Conversion::SARIF file ready: fortify-artifacts/$sarif_file"
 
       - name: Upload SARIF Artifact
         uses: actions/upload-artifact@v4

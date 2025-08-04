@@ -36,12 +36,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Download SAST metadata
-        uses: actions/download-artifact@v4
-        with:
-          name: fortify-metadata-${{ github.run_number }}
-          path: /tmp/fortify-metadata/
-
       - name: Convert FPR to SARIF
         env:
           fortify_project_name: ${{ inputs.name }}
@@ -51,15 +45,48 @@ jobs:
         run: |
           echo "::notice title=FPR to SARIF::Starting conversion for $fortify_project_name/$fortify_version_name"
           
-          # Ler metadados do SAST
-          if [[ ! -f "/tmp/fortify-metadata/version_id" ]]; then
-            echo "::error title=Metadata::Version ID file not found"
+          # Buscar projeto e versão no SSC
+          echo "::notice title=SSC Integration::Searching for project and version in SSC"
+          
+          # Buscar projeto existente
+          project_response=$(curl -sS -k -X GET \
+            -H "Accept: application/json" \
+            -H "Authorization: FortifyToken $fortify_unified_login_token" \
+            "$fortify_ssc_api_url/projects?q=name:$fortify_project_name" 2>/dev/null)
+          
+          if [[ $? -eq 0 ]] && echo "$project_response" | jq -e . >/dev/null 2>&1; then
+            project_id=$(echo "$project_response" | jq -r '.data[0].id // empty')
+            
+            if [[ -n "$project_id" ]] && [[ "$project_id" != "null" ]]; then
+              echo "::notice title=SSC Integration::Project found - ID: $project_id"
+            else
+              echo "::error title=SSC Integration::Project not found in SSC"
+              exit 1
+            fi
+          else
+            echo "::error title=SSC Integration::Failed to search project"
             exit 1
           fi
           
-          version_id=$(cat /tmp/fortify-metadata/version_id)
-          project_id=$(cat /tmp/fortify-metadata/project_id 2>/dev/null || echo "")
-          echo "::notice title=Metadata::Version ID: $version_id, Project ID: $project_id"
+          # Buscar versão do projeto
+          version_response=$(curl -sS -k -X GET \
+            -H "Accept: application/json" \
+            -H "Authorization: FortifyToken $fortify_unified_login_token" \
+            "$fortify_ssc_api_url/projectVersions?q=project.id:$project_id;name:$fortify_version_name" 2>/dev/null)
+          
+          if [[ $? -eq 0 ]] && echo "$version_response" | jq -e . >/dev/null 2>&1; then
+            version_id=$(echo "$version_response" | jq -r '.data[0].id // empty')
+            
+            if [[ -n "$version_id" ]] && [[ "$version_id" != "null" ]]; then
+              echo "::notice title=SSC Integration::Version found - ID: $version_id"
+            else
+              echo "::error title=SSC Integration::Version not found in SSC"
+              exit 1
+            fi
+          else
+            echo "::error title=SSC Integration::Failed to search version"
+            exit 1
+          fi
           
           # Download FPR
           echo "::notice title=FPR Download::Downloading FPR from SSC"

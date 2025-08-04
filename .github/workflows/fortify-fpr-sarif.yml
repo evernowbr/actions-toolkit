@@ -70,7 +70,7 @@ jobs:
          
           # Função para download FPR (baseada no fortify-json-sarif.yaml)
           fortify_download_fpr() {
-              echo "📥 Aguardando FPR disponível..."
+              echo "Aguardando FPR disponível..."
               
               local max_attempts=30
               local attempt=1
@@ -87,14 +87,14 @@ jobs:
                   fpr_id=$(echo "$response" | jq -r '.data[]? | select(.name? | test("\\.fpr$")) | .id' | head -1)
                   
                   if [ -n "$fpr_id" ] && [ "$fpr_id" != "null" ]; then
-                      echo "✅ FPR encontrado - ID: $fpr_id"
+                      echo "FPR encontrado - ID: $fpr_id"
                       mkdir -p fortify-artifacts
                       fpr_filename="$fortify_project_name-${fortify_version_name}.fpr"
                       
                       curl -sS -k -L -H "Authorization: FortifyToken $fortify_unified_login_token" -H "Accept: application/octet-stream" "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/artifacts/$fpr_id/content" -o "fortify-artifacts/$fpr_filename"
                       
                       if [ -f "fortify-artifacts/$fpr_filename" ] && [ $(wc -c < "fortify-artifacts/$fpr_filename") -gt 1024 ]; then
-                          echo "✅ FPR baixado com sucesso - $(wc -c < "fortify-artifacts/$fpr_filename") bytes"
+                          echo "FPR baixado com sucesso - $(wc -c < "fortify-artifacts/$fpr_filename") bytes"
                           fpr_file="fortify-artifacts/$fpr_filename"
                           break
                       fi
@@ -119,10 +119,10 @@ jobs:
           
           # Função para converter FPR para SARIF
           fortify_converter_fpr_sarif() {
-              echo "🔄 Convertendo FPR para SARIF..."
+              echo "Convertendo FPR para SARIF..."
               
               if ! command -v sarif >/dev/null 2>&1; then
-                  echo "📦 Instalando SARIF MultiTool..."
+                  echo "Instalando SARIF MultiTool..."
                   dotnet tool install --global Sarif.Multitool --version ${{ inputs.sarif_multitool_version }} --no-cache 2>/dev/null || true
                   export PATH="$HOME/.dotnet/tools:$PATH"
               fi
@@ -131,11 +131,11 @@ jobs:
               local sarif_file="fortify-artifacts/fortify-sast-results.sarif"
               
               if [ -n "$fpr_file" ] && [ -f "$fpr_file" ]; then
-                  echo "🔄 Convertendo: $fpr_file"
+                  echo "Convertendo: $fpr_file"
                   timeout 300 sarif convert "$fpr_file" --tool FortifyFpr --output "$sarif_file" --pretty-print --force 2>/dev/null || true
                   
                   if [ -f "$sarif_file" ] && [ -s "$sarif_file" ]; then
-                      echo "✅ Conversão FPR para SARIF concluída"
+                      echo "Conversão FPR para SARIF concluída"
                       
                       # Adicionar metadados ao SARIF
                       jq --arg project "$fortify_project_name" \
@@ -158,18 +158,18 @@ jobs:
                       # Validar SARIF
                       if jq -e . "$sarif_file" >/dev/null 2>&1; then
                           findings_count=$(jq '.runs[0].results | length' "$sarif_file" 2>/dev/null || echo "0")
-                          echo "✅ SARIF válido - $findings_count findings encontrados"
+                          echo "SARIF válido - $findings_count findings encontrados"
                           return 0
                       else
-                          echo "❌ SARIF inválido"
+                          echo "SARIF inválido"
                           return 1
                       fi
                   else
-                      echo "❌ Falha na conversão FPR para SARIF"
+                      echo "Falha na conversão FPR para SARIF"
                       return 1
                   fi
               else
-                  echo "❌ Arquivo FPR não encontrado"
+                  echo "Arquivo FPR não encontrado"
                   return 1
               fi
           }
@@ -223,3 +223,4 @@ jobs:
           path: fortify-artifacts/fortify-sast-results.sarif
           if-no-files-found: error
           retention-days: 30
+

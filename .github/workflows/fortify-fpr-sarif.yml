@@ -42,16 +42,71 @@ jobs:
       - name: Setup Fortify Environment
         run: |
           echo "::notice title=Fortify Setup::Configurando ambiente Fortify"
-          export FORTIFY_HOME=/opt/fortify
-          export PATH="$FORTIFY_HOME/bin:$PATH"
           
-          # Verificar se ScanCentral está disponível
-          if ! command -v scancentral >/dev/null 2>&1; then
-            echo "::error title=Fortify Setup::ScanCentral não encontrado em $FORTIFY_HOME/bin"
-            exit 1
+          # Tentar múltiplos caminhos para o ScanCentral
+          scancentral_path=""
+          
+          # Caminhos possíveis
+          possible_paths=(
+            "/opt/fortify/bin/scancentral"
+            "/opt/Fortify_ScanCentral_Client_25.2.0_x64/bin/scancentral"
+            "/opt/Fortify_ScanCentral_Client_25.2.0/bin/scancentral"
+            "/opt/fortify/ScanCentral_Client/bin/scancentral"
+            "/usr/local/bin/scancentral"
+            "/usr/bin/scancentral"
+            "/opt/fortify/scancentral"
+            "/opt/Fortify/scancentral"
+          )
+          
+          echo "::notice title=Fortify Setup::Procurando ScanCentral..."
+          
+          for path in "${possible_paths[@]}"; do
+            if [ -f "$path" ] && [ -x "$path" ]; then
+              scancentral_path="$path"
+              echo "::notice title=Fortify Setup::ScanCentral encontrado em: $path"
+              break
+            fi
+          done
+          
+          # Se não encontrou nos caminhos fixos, procurar no PATH
+          if [ -z "$scancentral_path" ]; then
+            if command -v scancentral >/dev/null 2>&1; then
+              scancentral_path=$(which scancentral)
+              echo "::notice title=Fortify Setup::ScanCentral encontrado no PATH: $scancentral_path"
+            fi
           fi
           
-          echo "::notice title=Fortify Setup::ScanCentral version: $(scancentral -version)"
+          # Se ainda não encontrou, procurar recursivamente
+          if [ -z "$scancentral_path" ]; then
+            echo "::notice title=Fortify Setup::Procurando ScanCentral recursivamente..."
+            scancentral_path=$(find /opt -name "scancentral" -type f -executable 2>/dev/null | head -1)
+            if [ -n "$scancentral_path" ]; then
+              echo "::notice title=Fortify Setup::ScanCentral encontrado recursivamente: $scancentral_path"
+            fi
+          fi
+          
+          # Se encontrou, configurar PATH
+          if [ -n "$scancentral_path" ]; then
+            scancentral_dir=$(dirname "$scancentral_path")
+            export PATH="$scancentral_dir:$PATH"
+            echo "::notice title=Fortify Setup::PATH atualizado: $scancentral_dir"
+            
+            # Verificar versão
+            if scancentral -version >/dev/null 2>&1; then
+              echo "::notice title=Fortify Setup::ScanCentral version: $(scancentral -version)"
+            else
+              echo "::notice title=Fortify Setup::ScanCentral encontrado mas não consegue executar -version"
+            fi
+          else
+            echo "::error title=Fortify Setup::ScanCentral não encontrado"
+            echo "::notice title=Fortify Setup::Caminhos verificados:"
+            for path in "${possible_paths[@]}"; do
+              echo "  - $path"
+            done
+            echo "::notice title=Fortify Setup::Procurando no sistema..."
+            find /opt -name "*scancentral*" -type f 2>/dev/null | head -10
+            exit 1
+          fi
 
       - name: Fortify SAST Scan and FPR Download
         env:

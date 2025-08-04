@@ -177,6 +177,7 @@ jobs:
           # Verificar se projeto e versão já existem (mesma lógica do fortify-sast.yml)
           echo "🔍 Verificando se o projeto $fortify_project_name existe no SSC..."
           response=$(curl -sS -k -X GET --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/projectVersions?q=$fortify_project_name&fulltextsearch=true")
+          echo "Resposta da API: $response"
           exit_code=$?
           fortify_verificar_resposta_api
           
@@ -223,4 +224,5 @@ jobs:
           path: fortify-artifacts/fortify-sast-results.sarif
           if-no-files-found: error
           retention-days: 30
+
 

@@ -13,11 +13,6 @@ on:
       version:
         required: true
         type: string
-      sarif_multitool_version:
-        description: 'Versão específica do SARIF MultiTool'
-        required: false
-        default: 'latest'
-        type: string
 
     secrets:
       FORTIFY_SSC_API_URL:
@@ -33,80 +28,11 @@ jobs:
   fortify-fpr-sarif:
     name: FPR to SARIF Conversion
     runs-on: self-hosted
-    timeout-minutes: 120
     
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Fortify Environment
-        run: |
-          echo "::notice title=Fortify Setup::Configurando ambiente Fortify"
-          
-          # Tentar múltiplos caminhos para o ScanCentral
-          scancentral_path=""
-          
-          # Caminhos possíveis
-          possible_paths=(
-            "/opt/fortify/bin/scancentral"
-            "/opt/Fortify_ScanCentral_Client_25.2.0_x64/bin/scancentral"
-            "/opt/Fortify_ScanCentral_Client_25.2.0/bin/scancentral"
-            "/opt/fortify/ScanCentral_Client/bin/scancentral"
-            "/usr/local/bin/scancentral"
-            "/usr/bin/scancentral"
-            "/opt/fortify/scancentral"
-            "/opt/Fortify/scancentral"
-          )
-          
-          echo "::notice title=Fortify Setup::Procurando ScanCentral..."
-          
-          for path in "${possible_paths[@]}"; do
-            if [ -f "$path" ] && [ -x "$path" ]; then
-              scancentral_path="$path"
-              echo "::notice title=Fortify Setup::ScanCentral encontrado em: $path"
-              break
-            fi
-          done
-          
-          # Se não encontrou nos caminhos fixos, procurar no PATH
-          if [ -z "$scancentral_path" ]; then
-            if command -v scancentral >/dev/null 2>&1; then
-              scancentral_path=$(which scancentral)
-              echo "::notice title=Fortify Setup::ScanCentral encontrado no PATH: $scancentral_path"
-            fi
-          fi
-          
-          # Se ainda não encontrou, procurar recursivamente
-          if [ -z "$scancentral_path" ]; then
-            echo "::notice title=Fortify Setup::Procurando ScanCentral recursivamente..."
-            scancentral_path=$(find /opt -name "scancentral" -type f -executable 2>/dev/null | head -1)
-            if [ -n "$scancentral_path" ]; then
-              echo "::notice title=Fortify Setup::ScanCentral encontrado recursivamente: $scancentral_path"
-            fi
-          fi
-          
-          # Se encontrou, configurar PATH
-          if [ -n "$scancentral_path" ]; then
-            scancentral_dir=$(dirname "$scancentral_path")
-            export PATH="$scancentral_dir:$PATH"
-            echo "::notice title=Fortify Setup::PATH atualizado: $scancentral_dir"
-            
-            # Verificar versão
-            if scancentral -version >/dev/null 2>&1; then
-              echo "::notice title=Fortify Setup::ScanCentral version: $(scancentral -version)"
-            else
-              echo "::notice title=Fortify Setup::ScanCentral encontrado mas não consegue executar -version"
-            fi
-          else
-            echo "::error title=Fortify Setup::ScanCentral não encontrado"
-            echo "::notice title=Fortify Setup::Caminhos verificados:"
-            for path in "${possible_paths[@]}"; do
-              echo "  - $path"
-            done
-            echo "::notice title=Fortify Setup::Procurando no sistema..."
-            find /opt -name "*scancentral*" -type f 2>/dev/null | head -10
-            exit 1
-          fi
 
       - name: Fortify SAST Scan and FPR Download
         env:
@@ -117,109 +43,31 @@ jobs:
           fortify_controller_url: ${{ secrets.FORTIFY_CONTROLLER_URL }}
           fortify_controller_token: ${{ secrets.FORTIFY_CONTROLLER_TOKEN }}
         run: |
-          echo "::notice title=Fortify SAST::Starting scan for $fortify_project_name/$fortify_version_name"
-          
-          # Definir variável scancentral_tool (mesma do fortify-sast.yml)
-          fortify_scancentral_tool="scancentral"
-          
-          # Funções de validação de API (mesmas do fortify-sast.yml)
+    
+          # Função de validação de API 
           fortify_verificar_resposta_api() {
               if [ "$exit_code" == "0" ] || [ "$exit_code" == "" ]; then
                   responseCode=$(echo "$response" | jq '.responseCode')
                   if [ "$responseCode" != "200" ] && [ "$responseCode" != "201" ]; then
-                      echo "❌ Código de retorno diferente de 200: API retornou código $responseCode"
-                      echo "❌ Resposta da API: $response"
+                      echo "Código de retorno diferente de 200: API retornou código $responseCode"
+                      echo "Resposta da API: $response"
                       exit 1
                   fi
               else
-                  echo "❌ Comando retornou $exit_code"
-                  echo "❌ Mensagem de erro: $response"  
+                  echo "Comando retornou $exit_code"
+                  echo "Mensagem de erro: $response"  
                   exit $exit_code
               fi
           }
-
+          # Função de validar código de resposta
           fortify_verificar_codigo_de_resposta() {
               if [ "$exit_code" != "0" ]; then
-                  echo "❌ Comando retornou $exit_code"
+                  echo "Comando retornou $exit_code"
                   exit $exit_code
               fi
           }
           
-          # Função para criar projeto e versão (mesma do fortify-sast.yml)
-          fortify_criar_projeto_e_versao() {
-              echo "🔧 Criando projeto e versão no SSC..."
-              fortify_project_parameters='{"project":{"name":"'$fortify_project_name'"},"issueTemplateId":"Prioritized-HighRisk-Project-Template","name":"'$fortify_version_name'","customTagValuesAutoApply":true,"autoPredict":true,"predictionPolicy":"LAB Fortify Policy"}'
-              response=$(curl -sS -k -X POST --header "Content-Type: application/json" --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/projectVersions" -d "$fortify_project_parameters")
-              exit_code=$?
-              fortify_verificar_resposta_api
-              fortify_project_id=$(echo "$response" | jq '.data.project.id')
-              fortify_project_version_id=$(echo "$response" | jq '.data.id')
-              echo "✅ Projeto $fortify_project_name criado com ID $fortify_project_id."
-              echo "✅ Versão $fortify_version_name criada com ID $fortify_project_version_id."
-          }
-          
-          fortify_criar_versao() {
-              echo "🔧 Criando versão para projeto existente..."
-              fortify_project_parameters='{"project":{"name":"'$fortify_project_name'","id":"'$fortify_project_id'"},"issueTemplateId":"Prioritized-HighRisk-Project-Template","name": "'$fortify_version_name'"}'
-              response=$(curl -sS -k -X POST --header "Content-Type: application/json" --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/projectVersions" -d "$fortify_project_parameters")
-              exit_code=$?
-              fortify_verificar_resposta_api
-              fortify_project_version_id=$(echo "$response" | jq '.data.id')
-              echo "✅ Versão $fortify_version_name criada com ID $fortify_project_version_id."
-          }
-          
-          # Função para configurar projeto (adicionada do fortify-sast.yml)
-          fortify_configurar_projeto() {
-              echo "🔧 Configurando parâmetros adicionais do projeto..."
-              fortify_parametros='{"requests":[{"uri":"'$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/attributes'","httpVerb":"PUT","postData":[{"values":[{"guid":"New"}],"attributeDefinitionId":5},{"values":[{"guid":"Internal"}],"attributeDefinitionId":6},{"values":[{"guid":"internalnetwork"}],"attributeDefinitionId":7}]},{"uri":"'$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/authEntities'","httpVerb":"PUT","postData":[]},{"uri":"'$fortify_ssc_api_url/projectVersions/$fortify_project_version_id?hideProgress=true'","httpVerb":"PUT","postData":{"committed":true}}]}'
-              response=$(curl -sS -k -X POST --header "Content-Type: application/json" --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/bulk" -d "$fortify_parametros")
-              exit_code=$?
-              fortify_verificar_resposta_api
-              successCount=$(echo "$response" | jq '.successCount')
-              if [ "$successCount" != "3" ]; then
-                  echo "❌ Parâmetros adicionais do projeto $fortify_project_name configurados sem sucesso."
-                  echo "❌ Código de retorno diferente de 200: API retornou código $exit_code"
-                  echo "❌ Resposta da API: $response"
-                  exit 1
-              else
-                  echo "✅ Parâmetros adicionais do projeto $fortify_project_name configurados com sucesso."
-              fi
-          }
-          
-          # Função para regras de processamento (adicionada do fortify-sast.yml)
-          fortify_regras_processamento() {
-              echo "🔧 Configurando regras de processamento..."
-              response=$(curl -sS -k -X PUT --header "Content-Type: application/json" --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/resultProcessingRules" -d '[{"identifier": "com.fortify.manager.BLL.processingrules.BuildProjectProcessingRule","displayName": "Require approval if the Build Project is different between scans","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.FileCountProcessingRule","displayName": "Require approval if file count differs by more than 10%","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.LOCCountProcessingRule","displayName": "Require approval if line count differs by more than 10%","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.NewerEngineVersionProcessingRule","displayName": "Require approval if the engine version of a scan is newer than the engine version of the previous scan","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.RulePackVersionProcessingRule","displayName": "Require approval if the rulepacks used in the scan do not match the rulepacks used in the previous scan","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.WarningProcessingRule","displayName": "Require approval if result has analysis warnings","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.ExternalListVersionProcessingRule","displayName": "Check external metadata file versions in scan against versions on server.","displayable": true,"enabled": false}]')
-              exit_code=$?
-              fortify_verificar_resposta_api
-              echo "✅ Regras de processamento do projeto $fortify_project_name configuradas com sucesso."
-          }
-          
-          # Função para executar scan (corrigida baseada no fortify-sast.yml)
-          fortify_executar_scan() {
-              echo "🔍 Executando ScanCentral..."
-              
-              # Usar o comando correto do fortify-sast.yml
-              echo "🔧 Executando Scancentral Client"
-              output=$($fortify_scancentral_tool -ssctoken $fortify_controller_token -url $fortify_controller_url start -skipBuild -block --log-file fortify.log --overwrite -application $fortify_project_name -version $fortify_version_name --upload-to-ssc --ssc-upload-token $fortify_controller_token 2>&1 | tee /dev/stderr)
-              
-              # Verifica o código de resposta
-              exit_code=$?
-              fortify_verificar_codigo_de_resposta
-              
-              # Extrai o job token da saída usando grep e regex
-              fortify_job_token=$(echo "$output" | grep "Submitted job and received token" | grep -E -o "[a-f0-9-]{36}")
-              
-              # Verifica se o job token foi encontrado
-              if [ -z "$fortify_job_token" ]; then
-                  echo "❌ Job token não foi criado."
-                  return 1
-              else
-                  echo "✅ Arquivos para scan enviados com sucesso. ID do Scan: $fortify_job_token"
-                  return 0
-              fi
-          }
-          
+         
           # Função para download FPR (baseada no fortify-json-sarif.yaml)
           fortify_download_fpr() {
               echo "📥 Aguardando FPR disponível..."
@@ -261,10 +109,10 @@ jobs:
               done
               
               if [ -n "$fpr_file" ]; then
-                  echo "✅ FPR disponível: $fpr_file"
+                  echo "FPR disponível: $fpr_file"
                   return 0
               else
-                  echo "❌ FPR não encontrado após $max_attempts tentativas"
+                  echo "FPR não encontrado após $max_attempts tentativas"
                   return 1
               fi
           }
@@ -326,16 +174,6 @@ jobs:
               fi
           }
           
-          # ========== EXECUÇÃO PRINCIPAL ==========
-          
-          echo '   ____            __   _  ___        ____ ___    ____ ______ '
-          echo '  / __/___   ____ / /_ (_)/ _/__ __  / __// _ |  / __//_  __/ '
-          echo ' / _/ / _ \ / __// __// // _// // / _\ \ / __ | _\ \   / /    ' 
-          echo '/_/   \___//_/   \__//_//_/  \_, / /___//_/ |_|/___/  /_/     '
-          echo '                            /___/                             '
-          echo ""
-          echo "🚀 Iniciando Fortify SAST Scan..."
-          
           # Verificar se projeto e versão já existem (mesma lógica do fortify-sast.yml)
           echo "🔍 Verificando se o projeto $fortify_project_name existe no SSC..."
           response=$(curl -sS -k -X GET --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/projectVersions?q=$fortify_project_name&fulltextsearch=true")
@@ -347,25 +185,16 @@ jobs:
           
           if [ "$fortify_project_version_id" != "" ]; then
               # Já existe projeto e versão no SSC
-              echo "✅ O projeto $fortify_project_name já existe no SSC com ID $fortify_project_id."
-              echo "✅ A versão $fortify_version_name já existe no SSC com ID $fortify_project_version_id."
+              echo "O projeto $fortify_project_name já existe no SSC com ID $fortify_project_id."
+              echo "A versão $fortify_version_name já existe no SSC com ID $fortify_project_version_id."
           elif [ "$fortify_project_id" != "" ]; then
               # Já existe projeto (sem versão) no SSC
-              echo "✅ O projeto $fortify_project_name já existe no SSC com ID $fortify_project_id. Criando versão..."
-              fortify_criar_versao
+              echo "O projeto $fortify_project_name já existe no SSC com ID $fortify_project_id. Criando versão..."
           else
               # Não tem projeto nem versão no SSC
-              echo "⚠️ O projeto $fortify_project_name ainda não existe no SSC. Criando projeto e versão..."
-              fortify_criar_projeto_e_versao
+              echo "O projeto $fortify_project_name ainda não existe no SSC. Criando projeto e versão..."
           fi
-          
-          # Configurar projeto (adicionado do fortify-sast.yml)
-          fortify_configurar_projeto
-          fortify_regras_processamento
-          
-          # Executar scan
-          if fortify_executar_scan; then
-              echo "✅ Scan executado com sucesso"
+        
               
               # Download FPR
               if fortify_download_fpr; then

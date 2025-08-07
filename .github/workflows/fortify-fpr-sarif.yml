@@ -13,6 +13,22 @@ on:
       version:
         required: true
         type: string
+      sarif_multitool_version:
+        required: false
+        type: string
+        default: "4.4.0"
+      fortify_scancentral_tool:
+        required: false
+        type: string
+        default: "scancentral"
+      fortify_translate_name:
+        required: false
+        type: string
+        default: "sourceanalyzer"
+      fortify_translate_additional_flags:
+        required: false
+        type: string
+        default: ""
 
     secrets:
       FORTIFY_SSC_API_URL:
@@ -28,11 +44,11 @@ jobs:
   fortify-fpr-sarif:
     name: FPR to SARIF Conversion
     runs-on: self-hosted
+    timeout-minutes: 60
     
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
 
       - name: Fortify SAST Scan and FPR Download
         env:
@@ -42,6 +58,9 @@ jobs:
           fortify_unified_login_token: ${{ secrets.FORTIFY_UNIFIED_LOGIN_TOKEN }}
           fortify_controller_url: ${{ secrets.FORTIFY_CONTROLLER_URL }}
           fortify_controller_token: ${{ secrets.FORTIFY_CONTROLLER_TOKEN }}
+          fortify_scancentral_tool: ${{ inputs.fortify_scancentral_tool }}
+          fortify_translate_name: ${{ inputs.fortify_translate_name }}
+          fortify_translate_additional_flags: ${{ inputs.fortify_translate_additional_flags }}
         run: |
     
           # Função de validação de API 
@@ -59,6 +78,7 @@ jobs:
                   exit $exit_code
               fi
           }
+          
           # Função de validar código de resposta
           fortify_verificar_codigo_de_resposta() {
               if [ "$exit_code" != "0" ]; then
@@ -67,8 +87,70 @@ jobs:
               fi
           }
           
-         
-          # Função para download FPR (baseada no fortify-json-sarif.yaml)
+          # Função para criar projeto e versão (baseada no fortify-sast.yml)
+          fortify_criar_projeto_e_versao() {
+              # Cria um projeto e uma versão novos
+              fortify_project_parameters='{"project":{"name":"'$fortify_project_name'"},"issueTemplateId":"Prioritized-HighRisk-Project-Template","name":"'$fortify_version_name'","customTagValuesAutoApply":true,"autoPredict":true,"predictionPolicy":"LAB Fortify Policy"}'
+              response=$(curl -sS -k -X POST --header "Content-Type: application/json" --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/projectVersions" -d "$fortify_project_parameters")
+              exit_code=$?
+              fortify_verificar_resposta_api
+              fortify_project_id=$(echo "$response" | jq '.data.project.id')
+              fortify_project_version_id=$(echo "$response" | jq '.data.id')
+              echo "✅ Projeto $fortify_project_name criado com ID $fortify_project_id."
+              echo "✅ Versão $fortify_version_name criada com ID $fortify_project_version_id."
+          }
+          
+          # Função para criar apenas versão (baseada no fortify-sast.yml)
+          fortify_criar_versao() {
+              # Cria uma versão para um projeto já existente
+              fortify_project_parameters='{"project":{"name":"'$fortify_project_name'","id":"'$fortify_project_id'"},"issueTemplateId":"Prioritized-HighRisk-Project-Template","name": "'$fortify_version_name'"}'
+              response=$(curl -sS -k -X POST --header "Content-Type: application/json" --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/projectVersions" -d "$fortify_project_parameters")
+              exit_code=$?
+              fortify_verificar_resposta_api
+              fortify_project_version_id=$(echo "$response" | jq '.data.id')
+              echo "✅ Versão $fortify_version_name criada com ID $fortify_project_version_id."
+          }
+          
+          # Função para configurar projeto (baseada no fortify-sast.yml)
+          fortify_configurar_projeto() {
+              # Configurar parâmetros adicionais do projeto
+              fortify_parametros='{"requests":[{"uri":"'$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/attributes'","httpVerb":"PUT","postData":[{"values":[{"guid":"New"}],"attributeDefinitionId":5},{"values":[{"guid":"Internal"}],"attributeDefinitionId":6},{"values":[{"guid":"internalnetwork"}],"attributeDefinitionId":7}]},{"uri":"'$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/authEntities'","httpVerb":"PUT","postData":[]},{"uri":"'$fortify_ssc_api_url/projectVersions/$fortify_project_version_id?hideProgress=true'","httpVerb":"PUT","postData":{"committed":true}}]}'
+              response=$(curl -sS -k -X POST --header "Content-Type: application/json" --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/bulk" -d "$fortify_parametros")
+              exit_code=$?
+              fortify_verificar_resposta_api
+              successCount=$(echo "$response" | jq '.successCount')
+              if [ "$successCount" != "3" ]; then
+                  echo "❌ Parâmetros adicionais do projeto $fortify_project_name configurados sem sucesso."
+                  echo "❌ Código de retorno diferente de 200: API retornou código $exit_code"
+                  echo "❌ Resposta da API: $response"
+                  exit 1
+              else
+                  echo "✅ Parâmetros adicionais do projeto $fortify_project_name configurados com sucesso."
+              fi
+          }
+          
+          # Função para executar scan (baseada no fortify-sast.yml)
+          fortify_executar_scan() {
+              echo "🔧 Executando Scancentral Client"
+              output=$($fortify_scancentral_tool -ssctoken $fortify_controller_token -url $fortify_controller_url start -skipBuild -block --log-file fortify.log --overwrite -application $fortify_project_name -version $fortify_version_name --upload-to-ssc --ssc-upload-token $fortify_controller_token 2>&1 | tee /dev/stderr )                    
+              
+              # Verifica o código de resposta
+              exit_code=$?
+              fortify_verificar_codigo_de_resposta
+                
+              # Extrai o job token da saída usando grep e regex
+              fortify_job_token=$(echo "$output" | grep "Submitted job and received token" | grep -E -o "[a-f0-9-]{36}")
+              
+              # Verifica se o job token foi encontrado
+              if [ -z "$fortify_job_token" ]; then
+                  echo "❌ Job token não foi criado."
+                  exit 1
+              else
+                  echo "✅ Arquivos para scan enviados com sucesso. ID do Scan: $fortify_job_token"
+              fi
+          }
+          
+          # Função para download FPR
           fortify_download_fpr() {
               echo "Aguardando FPR disponível..."
               
@@ -79,7 +161,7 @@ jobs:
               while [ $attempt -le $max_attempts ]; do
                   echo "⏳ Tentativa $attempt de $max_attempts..."
                   
-                  # Buscar artifacts usando a mesma lógica do fortify-json-sarif.yaml
+                  # Buscar artifacts
                   response=$(curl -sS -k -X GET --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/artifacts")
                   exit_code=$?
                   fortify_verificar_resposta_api
@@ -174,7 +256,7 @@ jobs:
               fi
           }
           
-          # Verificar se projeto e versão já existem (mesma lógica do fortify-sast.yml)
+          # Verificar se projeto e versão já existem
           echo "🔍 Verificando se o projeto $fortify_project_name existe no SSC..."
           response=$(curl -sS -k -X GET --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/projectVersions?q=$fortify_project_name&fulltextsearch=true")
           echo "Resposta da API: $response"
@@ -188,14 +270,32 @@ jobs:
               # Já existe projeto e versão no SSC
               echo "O projeto $fortify_project_name já existe no SSC com ID $fortify_project_id."
               echo "A versão $fortify_version_name já existe no SSC com ID $fortify_project_version_id."
+              
+              # Download FPR
+              if fortify_download_fpr; then
+                  echo "✅ FPR baixado com sucesso"
+                  
+                  # Converter FPR para SARIF
+                  if fortify_converter_fpr_sarif "fortify-artifacts/$fortify_project_name-${fortify_version_name}.fpr"; then
+                      echo "✅ SARIF gerado com sucesso"
+                  else
+                      echo "❌ Falha na conversão FPR para SARIF"
+                      exit 1
+                  fi
+              else
+                  echo "❌ Falha ao baixar FPR"
+                  exit 1
+              fi
           elif [ "$fortify_project_id" != "" ]; then
               # Já existe projeto (sem versão) no SSC
               echo "O projeto $fortify_project_name já existe no SSC com ID $fortify_project_id. Criando versão..."
-          else
-              # Não tem projeto nem versão no SSC
-              echo "O projeto $fortify_project_name ainda não existe no SSC. Criando projeto e versão..."
-          fi
-        
+              fortify_criar_versao
+              
+              # Configurar projeto
+              fortify_configurar_projeto
+              
+              # Executar scan
+              fortify_executar_scan
               
               # Download FPR
               if fortify_download_fpr; then
@@ -213,8 +313,31 @@ jobs:
                   exit 1
               fi
           else
-              echo "❌ Falha na execução do scan"
-              exit 1
+              # Não tem projeto nem versão no SSC
+              echo "O projeto $fortify_project_name ainda não existe no SSC. Criando projeto e versão..."
+              fortify_criar_projeto_e_versao
+              
+              # Configurar projeto
+              fortify_configurar_projeto
+              
+              # Executar scan
+              fortify_executar_scan
+              
+              # Download FPR
+              if fortify_download_fpr; then
+                  echo "✅ FPR baixado com sucesso"
+                  
+                  # Converter FPR para SARIF
+                  if fortify_converter_fpr_sarif "fortify-artifacts/$fortify_project_name-${fortify_version_name}.fpr"; then
+                      echo "✅ SARIF gerado com sucesso"
+                  else
+                      echo "❌ Falha na conversão FPR para SARIF"
+                      exit 1
+                  fi
+              else
+                  echo "❌ Falha ao baixar FPR"
+                  exit 1
+              fi
           fi
 
       - name: Upload SARIF Artifact
@@ -224,5 +347,4 @@ jobs:
           path: fortify-artifacts/fortify-sast-results.sarif
           if-no-files-found: error
           retention-days: 30
-
 

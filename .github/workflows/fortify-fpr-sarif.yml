@@ -129,7 +129,7 @@ jobs:
               fi
           }
           
-          # Função para executar scan (baseada no fortify-sast.yml)
+          # Função para executar scan e gerar FPR localmente
           fortify_executar_scan() {
               echo "🔧 Executando Scancentral Client"
               output=$($fortify_scancentral_tool -ssctoken $fortify_controller_token -url $fortify_controller_url start -skipBuild -block --log-file fortify.log --overwrite -application $fortify_project_name -version $fortify_version_name --upload-to-ssc --ssc-upload-token $fortify_controller_token 2>&1 | tee /dev/stderr )                    
@@ -147,6 +147,131 @@ jobs:
                   exit 1
               else
                   echo "✅ Arquivos para scan enviados com sucesso. ID do Scan: $fortify_job_token"
+              fi
+              
+              # Gerar FPR localmente após scan
+              echo "📦 Gerando FPR localmente..."
+              mkdir -p fortify-artifacts
+              fpr_filename="$fortify_project_name-${fortify_version_name}.fpr"
+              
+              # Usar sourceanalyzer para gerar FPR local
+              if command -v sourceanalyzer >/dev/null 2>&1; then
+                  echo "🔄 Gerando FPR com sourceanalyzer..."
+                  sourceanalyzer -b $fortify_project_name -scan -f "fortify-artifacts/$fpr_filename" 2>/dev/null || true
+                  
+                  if [ -f "fortify-artifacts/$fpr_filename" ] && [ $(wc -c < "fortify-artifacts/$fpr_filename") -gt 1024 ]; then
+                      echo "✅ FPR gerado localmente: fortify-artifacts/$fpr_filename"
+                      return 0
+                  fi
+              fi
+              
+              echo "⚠️ FPR local não gerado, tentando download do SSC..."
+              return 1
+          }
+          
+          # Função para download FPR (baseada no projeto original FPR)
+          fortify_download_fpr() {
+              echo "📥 Aguardando FPR disponível..."
+              
+              local max_attempts=30
+              local attempt=1
+              local fpr_file=""
+              
+              while [ $attempt -le $max_attempts ]; do
+                  echo "⏳ Tentativa $attempt de $max_attempts..."
+                  
+                  # Buscar artifacts
+                  response=$(curl -sS -k -X GET --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/artifacts")
+                  exit_code=$?
+                  fortify_verificar_resposta_api
+                  
+                  fpr_id=$(echo "$response" | jq -r '.data[]? | select(.name? | test("\\.fpr$")) | .id' | head -1)
+                  
+                  if [ -n "$fpr_id" ] && [ "$fpr_id" != "null" ]; then
+                      echo "✅ FPR encontrado - ID: $fpr_id"
+                      mkdir -p fortify-artifacts
+                      fpr_filename="$fortify_project_name-${fortify_version_name}.fpr"
+                      
+                      curl -sS -k -L -H "Authorization: FortifyToken $fortify_unified_login_token" -H "Accept: application/octet-stream" "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/artifacts/$fpr_id/content" -o "fortify-artifacts/$fpr_filename"
+                      
+                      if [ -f "fortify-artifacts/$fpr_filename" ] && [ $(wc -c < "fortify-artifacts/$fpr_filename") -gt 1024 ]; then
+                          echo "✅ FPR baixado com sucesso - $(wc -c < "fortify-artifacts/$fpr_filename") bytes"
+                          fpr_file="fortify-artifacts/$fpr_filename"
+                          break
+                      fi
+                  fi
+                  
+                  if [ $attempt -lt $max_attempts ]; then
+                      echo "⏳ Aguardando 60 segundos..."
+                      sleep 60
+                  fi
+                  
+                  attempt=$((attempt + 1))
+              done
+              
+              if [ -n "$fpr_file" ]; then
+                  echo "✅ FPR disponível: $fpr_file"
+                  return 0
+              else
+                  echo "❌ FPR não encontrado após $max_attempts tentativas"
+                  return 1
+              fi
+          }
+          
+          # Função para converter FPR para SARIF (NOSSO OBJETIVO PRINCIPAL)
+          fortify_converter_fpr_sarif() {
+              echo "🔄 Convertendo FPR para SARIF..."
+              
+              if ! command -v sarif >/dev/null 2>&1; then
+                  echo "📦 Instalando SARIF MultiTool..."
+                  dotnet tool install --global Sarif.Multitool --version ${{ inputs.sarif_multitool_version }} --no-cache 2>/dev/null || true
+                  export PATH="$HOME/.dotnet/tools:$PATH"
+              fi
+              
+              local fpr_file="$1"
+              local sarif_file="fortify-artifacts/fortify-sast-results.sarif"
+              
+              if [ -n "$fpr_file" ] && [ -f "$fpr_file" ]; then
+                  echo "🔄 Convertendo: $fpr_file"
+                  timeout 300 sarif convert "$fpr_file" --tool FortifyFpr --output "$sarif_file" --pretty-print --force 2>/dev/null || true
+                  
+                  if [ -f "$sarif_file" ] && [ -s "$sarif_file" ]; then
+                      echo "✅ Conversão FPR para SARIF concluída"
+                      
+                      # Adicionar metadados ao SARIF
+                      jq --arg project "$fortify_project_name" \
+                         --arg version "$fortify_version_name" \
+                         --arg timestamp "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
+                         --arg version_id "$fortify_project_version_id" \
+                         --arg project_id "$fortify_project_id" \
+                         '(.runs[0].properties // {}) |= . + {
+                           "fortify_project": $project,
+                           "fortify_version": $version,
+                           "fortify_scan_time": $timestamp,
+                           "fortify_version_id": $version_id,
+                           "fortify_project_id": $project_id,
+                           "fortify_engine_version": "25.2.0",
+                           "conversion_method": "fpr_to_sarif",
+                           "github_run_id": "'${{ github.run_id }}'",
+                           "github_run_number": "'${{ github.run_number }}'"
+                         }' "$sarif_file" > "$sarif_file.tmp" && mv "$sarif_file.tmp" "$sarif_file"
+                      
+                      # Validar SARIF
+                      if jq -e . "$sarif_file" >/dev/null 2>&1; then
+                          findings_count=$(jq '.runs[0].results | length' "$sarif_file" 2>/dev/null || echo "0")
+                          echo "✅ SARIF válido - $findings_count findings encontrados"
+                          return 0
+                      else
+                          echo "❌ SARIF inválido"
+                          return 1
+                      fi
+                  else
+                      echo "❌ Falha na conversão FPR para SARIF"
+                      return 1
+                  fi
+              else
+                  echo "❌ Arquivo FPR não encontrado"
+                  return 1
               fi
           }
           
@@ -271,7 +396,7 @@ jobs:
               echo "O projeto $fortify_project_name já existe no SSC com ID $fortify_project_id."
               echo "A versão $fortify_version_name já existe no SSC com ID $fortify_project_version_id."
               
-              # Download FPR
+              # Download FPR e converter para SARIF
               if fortify_download_fpr; then
                   echo "✅ FPR baixado com sucesso"
                   
@@ -294,12 +419,9 @@ jobs:
               # Configurar projeto
               fortify_configurar_projeto
               
-              # Executar scan
-              fortify_executar_scan
-              
-              # Download FPR
-              if fortify_download_fpr; then
-                  echo "✅ FPR baixado com sucesso"
+              # Executar scan e gerar FPR local
+              if fortify_executar_scan; then
+                  echo "✅ FPR gerado localmente"
                   
                   # Converter FPR para SARIF
                   if fortify_converter_fpr_sarif "fortify-artifacts/$fortify_project_name-${fortify_version_name}.fpr"; then
@@ -309,8 +431,22 @@ jobs:
                       exit 1
                   fi
               else
-                  echo "❌ Falha ao baixar FPR"
-                  exit 1
+                  # Fallback: Download FPR do SSC
+                  echo "⚠️ Tentando download FPR do SSC..."
+                  if fortify_download_fpr; then
+                      echo "✅ FPR baixado com sucesso"
+                      
+                      # Converter FPR para SARIF
+                      if fortify_converter_fpr_sarif "fortify-artifacts/$fortify_project_name-${fortify_version_name}.fpr"; then
+                          echo "✅ SARIF gerado com sucesso"
+                      else
+                          echo "❌ Falha na conversão FPR para SARIF"
+                          exit 1
+                      fi
+                  else
+                      echo "❌ Falha ao baixar FPR"
+                      exit 1
+                  fi
               fi
           else
               # Não tem projeto nem versão no SSC
@@ -320,12 +456,9 @@ jobs:
               # Configurar projeto
               fortify_configurar_projeto
               
-              # Executar scan
-              fortify_executar_scan
-              
-              # Download FPR
-              if fortify_download_fpr; then
-                  echo "✅ FPR baixado com sucesso"
+              # Executar scan e gerar FPR local
+              if fortify_executar_scan; then
+                  echo "✅ FPR gerado localmente"
                   
                   # Converter FPR para SARIF
                   if fortify_converter_fpr_sarif "fortify-artifacts/$fortify_project_name-${fortify_version_name}.fpr"; then
@@ -335,8 +468,22 @@ jobs:
                       exit 1
                   fi
               else
-                  echo "❌ Falha ao baixar FPR"
-                  exit 1
+                  # Fallback: Download FPR do SSC
+                  echo "⚠️ Tentando download FPR do SSC..."
+                  if fortify_download_fpr; then
+                      echo "✅ FPR baixado com sucesso"
+                      
+                      # Converter FPR para SARIF
+                      if fortify_converter_fpr_sarif "fortify-artifacts/$fortify_project_name-${fortify_version_name}.fpr"; then
+                          echo "✅ SARIF gerado com sucesso"
+                      else
+                          echo "❌ Falha na conversão FPR para SARIF"
+                          exit 1
+                      fi
+                  else
+                      echo "❌ Falha ao baixar FPR"
+                      exit 1
+                  fi
               fi
           fi
 

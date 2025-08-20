@@ -32,9 +32,6 @@ jobs:
               env:
                   fortify_project_name: ${{ inputs.name }}
                   fortify_version_name: ${{ inputs.version }}
-                  fortify_translate_name: ${{ inputs.fortify_translate_name }}
-                  fortify_scancentral_tool: ${{ inputs.fortify_scancentral_tool }}
-                  fortify_translate_additional_flags: ${{ inputs.fortify_translate_additional_flags }}
                   fortify_ssc_api_url: ${{ secrets.FORTIFY_SSC_API_URL }}
                   fortify_unified_login_token: ${{ secrets.FORTIFY_UNIFIED_LOGIN_TOKEN }}
                   fortify_controller_url: ${{ secrets.FORTIFY_CONTROLLER_URL }}

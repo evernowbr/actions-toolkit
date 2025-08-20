@@ -9,15 +9,6 @@ on:
             version:
                 required: true
                 type: string
-            fortify_scancentral_tool:
-                required: true
-                type: string
-            fortify_translate_name:
-                required: true
-                type: string
-            fortify_translate_additional_flags:
-                required: true
-                type: string
         secrets:
             FORTIFY_SSC_API_URL:
                 required: true

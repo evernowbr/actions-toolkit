@@ -60,7 +60,8 @@ jobs:
                             --header "Accept: application/json" \
                             --header "Authorization: FortifyToken $fortify_unified_login_token" \
                             "$fortify_issues_url")
-                            
+                        
+                        echo "issues_response"    
                         echo "$issues_response"
                     
                         # Verifica se a chamada à API foi bem-sucedida

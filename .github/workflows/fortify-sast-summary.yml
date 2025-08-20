@@ -1,4 +1,4 @@
-name: Fortify SAST
+name: Fortify SAST Summary
 
 on:
     workflow_call:
@@ -37,7 +37,7 @@ jobs:
             - name: Checkout do repositório
               uses: actions/checkout@v4
                   
-            - name: Run Fortify
+            - name: Run Fortify Summary
               env:
                   fortify_project_name: ${{ inputs.name }}
                   fortify_version_name: ${{ inputs.version }}
@@ -48,9 +48,7 @@ jobs:
                   fortify_unified_login_token: ${{ secrets.FORTIFY_UNIFIED_LOGIN_TOKEN }}
                   fortify_controller_url: ${{ secrets.FORTIFY_CONTROLLER_URL }}
                   fortify_controller_token: ${{ secrets.FORTIFY_CONTROLLER_TOKEN }}
-              run: |
-                    # Função para extrair estatísticas das issues
-                    
+              run: |                    
                     fortify_extrair_estatisticas() {
                         echo "Extraindo estatísticas..."
                     

@@ -231,8 +231,6 @@ jobs:
                     }
                     
                     # Execução principal das funções sumamry e geração do Sarif
+                    fortify_extrair_estatisticas
                     echo "Aguardando processamento..."
                     gerar_relatorio_fortify
-                    echo "debug"    
-                    echo "$issues_response"
-                    echo "$fortify_issues_url"

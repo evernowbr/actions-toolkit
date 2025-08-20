@@ -42,7 +42,28 @@ jobs:
               run: |                    
                     fortify_extrair_estatisticas() {
                         echo "Extraindo estatísticas..."
-                    
+
+                        echo "Verificando se o projeto $fortify_project_name e versão $fortify_version_name existem no SSC..."
+
+                        # Consulta todas as versões do projeto no SSC
+                        response=$(curl -sS -k -X GET \
+                          --header "Accept: application/json" \
+                          --header "Authorization: FortifyToken $fortify_unified_login_token" \
+                          "$fortify_ssc_api_url/projectVersions?q=$fortify_project_name&fulltextsearch=true")
+                        
+                        # Extrair IDs com jq
+                        fortify_project_id=$(echo "$response" | jq -r '.data[] | select(.project.name=="'"$fortify_project_name"'") | .project.id' | head -1)
+                        fortify_project_version_id=$(echo "$response" | jq -r '.data[] | select(.project.name=="'"$fortify_project_name"'") | select(.name=="'"$fortify_version_name"'") | .id' | head -1)
+                        
+                        if [ -n "$fortify_project_version_id" ]; then
+                            echo "Projeto [$fortify_project_name] já existe (ID: $fortify_project_id)."
+                            echo "Versão [$fortify_version_name] já existe (ID: $fortify_project_version_id)."
+                        elif [ -n "$fortify_project_id" ]; then
+                            echo "⚠️ Projeto [$fortify_project_name] existe (ID: $fortify_project_id), mas versão [$fortify_version_name] não encontrada. Criando versão..."
+                        else
+                            echo "⚠️ Projeto [$fortify_project_name] não existe."
+                        fi
+
                         # Verifica se a variável de ID da versão do projeto está definida
                         if [ -z "$fortify_project_version_id" ]; then
                             echo "ID da versão não encontrado"

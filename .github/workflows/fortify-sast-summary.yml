@@ -76,7 +76,7 @@ jobs:
                     
                             if [ "$data_count" -gt 0 ]; then
                                 # Salva todas as vulnerabilidades em um arquivo temporário
-                                echo "$issues_response" > ./fortify-output/fortify_all_issues.json
+                                echo "$issues_response" > ./fortify_all_issues.json
                     
                                 # Processa os dados e conta as vulnerabilidades por severidade em uma única operação jq
                                 local counters
@@ -98,11 +98,11 @@ jobs:
                                     local total_count=$(echo "$counters" | jq -r '.total // 0')
                     
                                     # Salva os contadores em arquivos temporários
-                                    echo "$critical_count" > ./fortify-output/fortify_critical_count
-                                    echo "$high_count" > ./fortify-output/fortify_high_count
-                                    echo "$medium_count" > ./fortify-output/fortify_medium_count
-                                    echo "$low_count" > ./fortify-output/fortify_low_count
-                                    echo "$total_count" > ./fortify-output/fortify_total_count
+                                    echo "$critical_count" > ./fortify_critical_count
+                                    echo "$high_count" > ./fortify_high_count
+                                    echo "$medium_count" > ./fortify_medium_count
+                                    echo "$low_count" > ./fortify_low_count
+                                    echo "$total_count" > ./fortify_total_count
                     
                                     # Mostra os resultados no terminal
                                     echo "$total_count vulnerabilidades encontradas (CRITICAL: $critical_count, HIGH: $high_count, MEDIUM: $medium_count, LOW: $low_count)"
@@ -114,12 +114,12 @@ jobs:
                             else
                                 # Se nenhuma vulnerabilidade for encontrada, inicializa contadores com zero e salva arquivos vazios
                                 echo "Nenhuma vulnerabilidade encontrada"
-                                echo "0" > ./fortify-output/fortify_critical_count
-                                echo "0" > ./fortify-output/fortify_high_count
-                                echo "0" > ./fortify-output/fortify_medium_count
-                                echo "0" > ./fortify-output/fortify_low_count
-                                echo "0" > ./fortify-output/fortify_total_count
-                                echo '{"data":[]}' > ./fortify-output/fortify_all_issues.json
+                                echo "0" > ./fortify_critical_count
+                                echo "0" > ./fortify_high_count
+                                echo "0" > ./fortify_medium_count
+                                echo "0" > ./fortify_low_count
+                                echo "0" > ./fortify_total_count
+                                echo '{"data":[]}' > ./fortify_all_issues.json
                                 return 0
                             fi
                         else
@@ -135,18 +135,18 @@ jobs:
                         echo "+--------------------------------------------------------------------+"
                     
                         # Lê os contadores salvos em arquivos temporários; caso não existam, assume zero
-                        local critical_count=$(cat ./fortify-output/fortify_critical_count 2>/dev/null || echo 0)
-                        local high_count=$(cat ./fortify-output/fortify_high_count 2>/dev/null || echo 0)
-                        local medium_count=$(cat ./fortify-output/fortify_medium_count 2>/dev/null || echo 0)
-                        local low_count=$(cat ./fortify-output/fortify_low_count 2>/dev/null || echo 0)
-                        local total_count=$(cat ./fortify-output/fortify_total_count 2>/dev/null || echo 0)
+                        local critical_count=$(cat ./fortify_critical_count 2>/dev/null || echo 0)
+                        local high_count=$(cat ./fortify_high_count 2>/dev/null || echo 0)
+                        local medium_count=$(cat ./fortify_medium_count 2>/dev/null || echo 0)
+                        local low_count=$(cat ./fortify_low_count 2>/dev/null || echo 0)
+                        local total_count=$(cat ./fortify_total_count 2>/dev/null || echo 0)
                     
                         echo "| Total: $total_count (CRITICAL: $critical_count, HIGH: $high_count, MEDIUM: $medium_count, LOW: $low_count)"
                         echo "+------------------------------+------------+----------+------------------------------------------+----------------+"
                         echo "| CATEGORIA                    | ISSUE ID   | SEVERITY | PRIMARY LOCATION:LINE NUMBER             | TAGGED         |"
                         echo "+------------------------------+------------+----------+------------------------------------------+----------------+"
                     
-                        cat ./fortify-output/fortify_all_issues.json 2>/dev/null | jq -r '
+                        cat ./fortify_all_issues.json 2>/dev/null | jq -r '
                             .data | .[0:10] | .[] | [
                               (if .subCategoryName then .subCategoryName
                                elif .categoryName then .categoryName
@@ -179,7 +179,7 @@ jobs:
                         echo "| CATEGORIA                    | CRÍTICA    | ALTA     | MÉDIA    | BAIXA    | TOTAL DE ISSUES |"
                         echo "+------------------------------+------------+----------+----------+----------+-----------------+"
                     
-                        cat ./fortify-output/fortify_all_issues.json | jq -r '
+                        cat ./fortify_all_issues.json | jq -r '
                             .data[] | 
                             [(.subCategoryName // .categoryName // .issueName // .subCategory // .category // .kingdom // "Unknown"), (.friority // .priority // "Unknown")] | @tsv' | awk -F'\t' '
                             function wrap(str, width, arr, n, out, i, len) {

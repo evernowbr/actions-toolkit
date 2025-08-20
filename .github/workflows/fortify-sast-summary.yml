@@ -53,8 +53,8 @@ jobs:
                         # filtro_url_encoded=%5Banalysis%20type%5D%3ASCA%20audited%3Afalse%20%5Bfortify%20priority%20order%5D%3Acritical%20%5Bfortify%20priority%20order%5D%3Ahigh%20%5Bfortify%20priority%20order%5D%3Amedium%0A
                         local issues_response
                         # Busca vulnerabilidades encontradas no projeto/versão
-                        #fortify_issues_url="$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/issues?qm=issues&q=$filtro_url_encoded"
-                        fortify_issues_url="$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/issues?
+                        # fortify_issues_url="$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/issues?qm=issues&q=$filtro_url_encoded"
+                        fortify_issues_url="$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/issues?"
                         issues_response=$(curl -sS -k -X GET \
                             --header "Content-Type: application/json" \
                             --header "Accept: application/json" \

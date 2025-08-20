@@ -1,0 +1,98 @@
+    - task: CmdLine@2
+      displayName: 'Generated Debricked Report'
+      inputs:
+        script: |
+          echo 'Obtendo API token do Debricked'
+
+          JWT=$(curl -s -X POST "https://debricked.com/api/login_check" \
+            -d "_username=$DEBRICKED_USER" \
+            -d "_password=$DEBRICKED_PASSWORD" | jq -r .token)
+  
+          if [ -z "$JWT" ]; then
+            echo "API token is NULL"
+          else
+            echo "API token is NOT NULL"
+          fi
+          
+          branch='$(Build.SourceBranch)'
+          echo $branch
+          if (echo $branch | grep "release")
+          then
+            branch="1.0.0"
+          else
+            if (echo $branch | grep "develop")
+            then
+              branch="dev"
+            else
+              branch='${{ parameters.FORTIFY_APP_VERSION }}'
+            fi
+          fi
+          echo Usando a versão "$branch" dentro do fortify
+  
+          echo 'Verificando ID do repositorio'
+          REPO_ID=$(curl -s --location "https://debricked.com/api/1.0/open/repository-settings/repositories?page=1&rowsPerPage=25&search=$(Build.Repository.Name)" --header "Authorization: Bearer $JWT" | jq '.repositories[0] | .name | .repoId')
+          
+          echo Repositorio ID: "$REPO_ID"
+          echo 'Gerando relatorio:'
+          REPORT_UUID=$(curl -s --location "https://debricked.com/api/1.0/open/sbom/generate-cyclonedx-sbom" --header "Content-Type: application/json" --header "Authorization: Bearer $JWT" --data '{"repositoryIds":['$REPO_ID'],"branch":"'$branch'","vulnerabilities":true,"licenses":true,"sendEmail":false}' | jq -r .reportUuid)
+          
+          echo ID do relatorio: "$REPORT_UUID"
+          echo 'Status do relatorio'
+          i=0;
+          
+          REPORT_STATUS=$(curl -s -o sbom.json -w "%{http_code}" "https://debricked.com/api/1.0/open/sbom/download-generated-cyclonedx-sbom?reportUuid=$REPORT_UUID" -H "Authorization: Bearer $JWT")
+          while [ $REPORT_STATUS -ne 200 ]; do
+            echo "Report not done, checking again in 10 sec. Exec "$i""
+            sleep 10
+            REPORT_STATUS=$(curl -s -o sbom.json -w "%{http_code}" "https://debricked.com/api/1.0/open/sbom/download-generated-cyclonedx-sbom?reportUuid=$REPORT_UUID" -H "Authorization: Bearer $JWT")
+            if [ $i -gt 9 ]; then 
+            echo "Error generating report" 
+            break 
+            fi
+            i=$((i+1))
+          done
+          jq '.' sbom.json
+        workingDirectory: '$(Agent.BuildDirectory)'
+      env:
+        DEBRICKED_USER: $(DASA-DEBRICKED-USER)
+        DEBRICKED_PASSWORD: $(DASA-DEBRICKED-PASSWORD)
+        DEBRICKED_TOKEN: $(DEBRICKED-TOKEN)
+  
+    - task: UniversalPackages@0
+      displayName: 'Download fcli.jar'
+      inputs:
+        command: download
+        vstsFeed: 'devsecops'
+        vstsFeedPackage: 'fcli.jar'
+        vstsPackageVersion: '1.2.5'
+        downloadDirectory: '$(Agent.BuildDirectory)'
+  
+    - task: CmdLine@2
+      displayName: 'Import Report To SSC'
+      inputs:
+        script: |
+          branch='$(Build.SourceBranch)'
+          echo $branch
+          if (echo $branch | grep "release")
+          then
+            branch="1.0.0"
+          else
+            if (echo $branch | grep "develop")
+            then
+              branch="dev"
+            else
+              branch='${{ parameters.FORTIFY_APP_VERSION }}'
+            fi
+          fi
+          echo Usando a versão "$branch" dentro do fortify
+          java -jar fcli.jar --version
+          java -jar fcli.jar ssc session login debricked --url "$(FORTIFY-SSC-URL)" --token "$(FORTIFY-API-TOKEN)"
+          java -jar fcli.jar ssc appversion-artifact upload sbom.json --appversion ${{ parameters.FORTIFY_APP_NAME }}:$branch --engine-type DEBRICKED --session debricked
+          java -jar fcli.jar ssc session logout debricked --no-revoke-token
+          java -jar fcli.jar ssc session list
+          rm -f fcli*.jar*
+        workingDirectory: '$(Agent.BuildDirectory)'
+      env:
+        FORTIFY_SSC_URL: $(FORTIFY-SSC-URL) 
+        FORTIFY_SSC_USER: $(FORTIFY-SSC-USER)
+        FORTIFY_SSC_PASSWORD: $(FORTIFY-SSC-PASSWORD)

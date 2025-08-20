@@ -21,7 +21,7 @@ on:
 
 jobs:
     scan:
-        name: Fortify SAST Sumamry
+        name: Fortify SAST Summary
         runs-on: self-hosted
 
         steps:

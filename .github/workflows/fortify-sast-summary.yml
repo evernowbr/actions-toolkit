@@ -55,15 +55,11 @@ jobs:
                         # Busca vulnerabilidades encontradas no projeto/versão
                         # fortify_issues_url="$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/issues?qm=issues&q=$filtro_url_encoded"
                         fortify_issues_url="$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/issues?"
-                        echo "fortify_issues_url"
                         issues_response=$(curl -sS -k -X GET \
                             --header "Content-Type: application/json" \
                             --header "Accept: application/json" \
                             --header "Authorization: FortifyToken $fortify_unified_login_token" \
                             "$fortify_issues_url")
-                        
-                        echo "issues_response"    
-                        echo "$issues_response"
                     
                         # Verifica se a chamada à API foi bem-sucedida
                         if [ $? -eq 0 ]; then
@@ -237,3 +233,6 @@ jobs:
                     # Execução principal das funções sumamry e geração do Sarif
                     echo "Aguardando processamento..."
                     gerar_relatorio_fortify
+                    echo "debug"    
+                    echo "$issues_response"
+                    echo "$fortify_issues_url"

@@ -246,7 +246,7 @@ jobs:
                         printf "| %-29s|\n" "TOTAL ISSUES FOUND: $total_count"
                         echo "+-------------------------------+"
                         echo " "
-                        echo "Relatório Detalhado: $fortify_ssc_url/version/${fortify_project_version_id}/audit"
+                        echo "Relatório Detalhado: https://fortify-ssc.evernow.com.br/ssc/version/${fortify_project_version_id}/audit"
                         echo "+-------------------------------------------------------------------------------------------------------------+"
                         echo " "
                     }

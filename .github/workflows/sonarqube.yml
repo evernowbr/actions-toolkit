@@ -28,15 +28,18 @@ jobs:
         run: |
           echo "Exportando certificado do SonarQube..."
           HOST=$(echo $SONAR_HOST_URL | sed 's|https://||')
-          echo -n | openssl s_client -connect $HOST:443 -servername $HOST 2>/dev/null | \
-            sed -ne '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' > sonarqube.crt
+          # Extrai somente o certificado X.509
+          echo -n | openssl s_client -showcerts -connect $HOST:443 -servername $HOST 2>/dev/null | \
+            awk '/-----BEGIN CERTIFICATE-----/{flag=1} /-----END CERTIFICATE-----/{print;flag=0} flag{print}' > sonarqube.crt
 
           echo "Importando certificado no truststore do Java..."
-          keytool -importcert -noprompt -trustcacerts \
+          sudo keytool -importcert \
+            -trustcacerts \
             -alias sonarqube \
             -file sonarqube.crt \
-            -keystore $JAVA_HOME/lib/security/cacerts \
-            -storepass changeit
+            -cacerts \
+            -storepass changeit \
+            -noprompt
 
       - name: Scan SonarQube
         env:

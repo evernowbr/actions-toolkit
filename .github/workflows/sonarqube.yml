@@ -32,7 +32,7 @@ jobs:
             sed -ne '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' > sonarqube.crt
 
           echo "Importando certificado no truststore do Java..."
-          sudo keytool -importcert -noprompt -trustcacerts \
+          keytool -importcert -noprompt -trustcacerts \
             -alias sonarqube \
             -file sonarqube.crt \
             -keystore $JAVA_HOME/lib/security/cacerts \

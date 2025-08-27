@@ -3,9 +3,6 @@ name: SonarQube
 on:
   workflow_call:
     inputs:
-      PROJECT_KEY:
-        required: true
-        type: string
       PROJECT_NAME:
         required: true
         type: string

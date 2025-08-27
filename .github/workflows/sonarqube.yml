@@ -15,7 +15,7 @@ on:
       SONAR_TOKEN:
         required: true
 jobs:
-  sonar:
+  sonar-qube:
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -24,8 +24,12 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
         run: |
-          mvn clean verify -DskipTests sonar:sonar 
-            -Djavax.net.ssl.trustStoreType=TrustAll \
+          mvn clean verify \
+            -DskipTests \
+            -Dmaven.wagon.http.ssl.insecure=true \
+            -Dmaven.wagon.http.ssl.allowall=true \
+            sonar:sonar \
             -Dsonar.projectKey=$PROJECT_NAME \
             -Dsonar.host.url=$SONAR_HOST_URL \
             -Dsonar.login=$SONAR_TOKEN
+

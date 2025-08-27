@@ -33,7 +33,7 @@ jobs:
             awk '/-----BEGIN CERTIFICATE-----/{flag=1} /-----END CERTIFICATE-----/{print;flag=0} flag{print}' > sonarqube.crt
 
           echo "Importando certificado no truststore do Java..."
-          sudo keytool -importcert \
+          keytool -importcert \
             -trustcacerts \
             -alias sonarqube \
             -file sonarqube.crt \

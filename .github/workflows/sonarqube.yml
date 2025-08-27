@@ -14,22 +14,39 @@ on:
         required: true
       SONAR_TOKEN:
         required: true
+
 jobs:
   sonar-qube:
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
+
+      - name: Import SonarQube SSL Certificate
+        env:
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+          JAVA_HOME: /usr/lib/jvm/java-17-openjdk-17.0.15.0.6-2.el9.x86_64
+        run: |
+          echo "Exportando certificado do SonarQube..."
+          HOST=$(echo $SONAR_HOST_URL | sed 's|https://||')
+          echo -n | openssl s_client -connect $HOST:443 -servername $HOST 2>/dev/null | \
+            sed -ne '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' > sonarqube.crt
+
+          echo "Importando certificado no truststore do Java..."
+          sudo keytool -importcert -noprompt -trustcacerts \
+            -alias sonarqube \
+            -file sonarqube.crt \
+            -keystore $JAVA_HOME/lib/security/cacerts \
+            -storepass changeit
+
       - name: Scan SonarQube
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+          PROJECT_NAME: ${{ inputs.PROJECT_NAME }}
         run: |
           mvn clean verify \
             -DskipTests \
-            -Dmaven.wagon.http.ssl.insecure=true \
-            -Dmaven.wagon.http.ssl.allowall=true \
             sonar:sonar \
             -Dsonar.projectKey=$PROJECT_NAME \
             -Dsonar.host.url=$SONAR_HOST_URL \
             -Dsonar.login=$SONAR_TOKEN
-

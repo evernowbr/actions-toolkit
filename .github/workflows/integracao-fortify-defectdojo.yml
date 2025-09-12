@@ -1,0 +1,65 @@
+: '
+integra_fortify.sh
+===============
+
+Este script integra resultados de scans do Fortify com o DefectDojo via API.
+
+Uso:
+    ./integra_fortify.sh <caminho_para_fortify_report.json>
+
+Parâmetros:
+    <caminho_para_fortify_report.json>  Caminho para o arquivo JSON de resultados do Fortify.
+
+Pré-requisitos:
+    - Arquivo .env presente no diretório atual, contendo as variáveis:
+        DEFECTDOJO_API_URL         URL base da API do DefectDojo (https://dss-defectdojo.net.bradesco.com.br/api/v2)
+        DEFECTDOJO_API_TOKEN       Token de autenticação da API do DefectDojo
+
+Fluxo do Script:
+    1. Carrega variáveis de ambiente do arquivo .env.
+    2. Extrai o nome do projeto do JSON do Fortify.
+    3. Busca ou cria o Product Type "Fortify" no DefectDojo.
+    4. Busca ou cria o Product correspondente ao projeto.
+    5. Busca ou cria um Engagement para o Product.
+    6. Realiza o upload do relatório do Fortify para o DefectDojo como um novo scan.
+
+Dependências:
+    - bash
+    - curl
+    - jq
+
+Notas:
+    - O script utiliza endpoints da API v2 do DefectDojo.
+    - O arquivo Fortify JSON deve estar no formato esperado pelo DefectDojo.
+    - O script encerra com erro caso algum passo crítico falhe (ex: variáveis ausentes, arquivo não encontrado).
+
+'
+#!/bin/bash
+
+# Parâmetros: caminho do JSON do Fortify
+FORTIFY_JSON="$1"
+if [ -z "$FORTIFY_JSON" ] || [ ! -f "$FORTIFY_JSON" ]; then
+    echo "Uso: $0 <caminho_para_fortify_report.json>"
+    exit 1
+fi
+
+# Carregar variáveis de ambiente
+if [ -f ".env" ]; then
+    export $(grep -v '^#' .env | xargs)
+else
+    echo "Erro: Arquivo .env não encontrado."
+    exit 1
+fi
+
+# Função para chamada à API do DefectDojo
+dojo_api_req() {
+    local method=$1
+    local url=$2
+    local data=$3
+    curl -s -X "$method" "$url" \
+        -H "accept: application/json" \
+        -H "Authorization: Token ${DEFECTDOJO_API_TOKEN}" \
+        -H "Content-Type: application/json" \
+        ${data:+-d "$data"} \
+        -k
+}

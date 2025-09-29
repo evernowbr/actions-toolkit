@@ -7,12 +7,14 @@ on:
         required: false
         type: string
         default: ''
-      repo_url:
-        required: true
+      fortify_fpr:
+        required: false
         type: string
-      ref:
-        required: true
+        default: ''
+      sarif_artifact_name:
+        required: false
         type: string
+        default: ''
     secrets:
       MOBB_API_KEY:
         required: true
@@ -34,22 +36,52 @@ jobs:
         with:
           version: latest
 
-      - name: "Run Bugsy Analyze (per docs: repo/ref; optional scan-file)"
+      - name: "Download SARIF artifact (if provided)"
+        if: ${{ inputs.sarif_artifact_name != '' && inputs.scan_file == '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.sarif_artifact_name }}
+          path: artifacts
+
+      - name: "Run Bugsy Analyze (SARIF or Fortify FPR)"
         shell: bash
         run: |
           set -euo pipefail
-          ARGS=( analyze --ci \
-            --repo "${{ inputs.repo_url }}" \
-            --ref "${{ inputs.ref }}" \
-            --api-key "${{ secrets.MOBB_API_KEY }}" )
 
-          if [[ -n "${{ inputs.scan_file }}" ]]; then
-            if [[ -f "${{ inputs.scan_file }}" ]]; then
-              ARGS+=( --scan-file "${{ inputs.scan_file }}" )
-            else
-              echo "scan_file informado mas não encontrado: ${{ inputs.scan_file }}" >&2
-              exit 1
+          # Determine SCAN_FILE path
+          SCAN_FILE="${{ inputs.scan_file }}"
+
+          if [[ -z "$SCAN_FILE" && -n "${{ inputs.sarif_artifact_name }}" ]]; then
+            # Find SARIF inside downloaded artifacts
+            if [[ -d artifacts ]]; then
+              found=$(find artifacts -type f -name "*.sarif" | head -n1 || true)
+              if [[ -n "$found" ]]; then
+                SCAN_FILE="$found"
+              fi
             fi
           fi
 
-          pnpm dlx mobbdev "${ARGS[@]}" 
+          if [[ -n "$SCAN_FILE" ]]; then
+            if [[ ! -f "$SCAN_FILE" ]]; then
+              echo "scan_file informado mas não encontrado: $SCAN_FILE" >&2
+              exit 1
+            fi
+            pnpm dlx mobbdev analyze --ci \
+              --scan-file "$SCAN_FILE" \
+              --api-key "${{ secrets.MOBB_API_KEY }}"
+            exit 0
+          fi
+
+          if [[ -n "${{ inputs.fortify_fpr }}" ]]; then
+            if [[ ! -f "${{ inputs.fortify_fpr }}" ]]; then
+              echo "Fortify FPR não encontrado no caminho: ${{ inputs.fortify_fpr }}" >&2
+              exit 1
+            fi
+            pnpm dlx mobbdev analyze --ci \
+              --scan-file "${{ inputs.fortify_fpr }}" \
+              --api-key "${{ secrets.MOBB_API_KEY }}"
+            exit 0
+          fi
+
+          echo "É necessário informar scan_file (SARIF) ou fortify_fpr (.fpr), ou fornecer sarif_artifact_name para download automático." >&2
+          exit 1 

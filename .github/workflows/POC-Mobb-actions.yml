@@ -34,7 +34,7 @@ jobs:
         with:
           version: latest
 
-      - name: Run Bugsy Analyze (per docs: repo/ref; optional scan-file)
+      - name: "Run Bugsy Analyze (per docs: repo/ref; optional scan-file)"
         shell: bash
         run: |
           set -euo pipefail

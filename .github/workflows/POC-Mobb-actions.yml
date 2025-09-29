@@ -8,11 +8,17 @@ on:
         type: string
         default: ''
       repo_url:
-        required: true
+        required: false
         type: string
+        default: ''
       ref:
-        required: true
+        required: false
         type: string
+        default: ''
+      src_path:
+        required: false
+        type: string
+        default: '.'
     secrets:
       MOBB_API_KEY:
         required: true
@@ -34,15 +40,26 @@ jobs:
         with:
           version: latest
 
-      - name: Run Bugsy Analyze (conditional scan-file)
+      - name: Run Bugsy Analyze (conditional scan-file / src-path)
         shell: bash
         run: |
           set -euo pipefail
           ARGS=( analyze --ci \
-            --repo "${{ inputs.repo_url }}" \
-            --ref "${{ inputs.ref }}" \
             --api-key "${{ secrets.MOBB_API_KEY }}" )
 
+          # Preferir src_path quando informado (evita necessidade de token do SCM)
+          if [[ -n "${{ inputs.src_path }}" ]]; then
+            ARGS+=( --src-path "${{ inputs.src_path }}" )
+          else
+            # Caso não tenha src_path, exigir repo_url/ref
+            if [[ -z "${{ inputs.repo_url }}" || -z "${{ inputs.ref }}" ]]; then
+              echo "repo_url/ref não fornecidos e src_path vazio. Forneça src_path OU repo_url+ref." >&2
+              exit 1
+            fi
+            ARGS+=( --repo "${{ inputs.repo_url }}" --ref "${{ inputs.ref }}" )
+          fi
+
+          # Adiciona scan-file se informado e existir
           if [[ -n "${{ inputs.scan_file }}" ]]; then
             if [[ -f "${{ inputs.scan_file }}" ]]; then
               ARGS+=( --scan-file "${{ inputs.scan_file }}" )

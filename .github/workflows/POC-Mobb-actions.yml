@@ -1,26 +1,29 @@
-name: Bugsy Analyze (Linux)
+name: POC Mobb Actions
 
 on:
-  workflow_dispatch:
+  workflow_call:
     inputs:
       scan_file:
-        description: 'Caminho do relatório SAST (ex.: sast_results.json)'
         required: true
-        default: 'sast_results.json'
-  push:
-  pull_request:
+        type: string
+      repo_url:
+        required: true
+        type: string
+      ref:
+        required: true
+        type: string
+    secrets:
+      MOBB_API_KEY:
+        required: true
 
 jobs:
-  analyze:
+  run_mobb:
     runs-on: ubuntu-latest
-    env:
-      MOBB_API_KEY: ${{ secrets.MOBB_API_KEY }}
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Node.js (LTS)
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 'lts/*'
@@ -33,7 +36,7 @@ jobs:
       - name: Run Bugsy Analyze
         run: >
           pnpm dlx mobbdev analyze --ci
-          --scan-file "${{ github.event.inputs.scan_file || 'sast_results.json' }}"
-          --repo "https://github.com/${{ github.repository }}"
-          --ref "${{ github.ref_name }}"
-          --api-key "${{ env.MOBB_API_KEY }}" 
+          --scan-file "${{ inputs.scan_file }}"
+          --repo "${{ inputs.repo_url }}"
+          --ref "${{ inputs.ref }}"
+          --api-key "${{ secrets.MOBB_API_KEY }}"

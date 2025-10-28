@@ -224,7 +224,7 @@ jobs:
                     fi
 
                     echo "=============================================================================="
-                    echo "Baixa issues do Fortify"
+                    echo "Gerao o relatório de issues no Fortify"
                     echo "=============================================================================="
                     responseIssues=$(curl -s -w "%{http_code}" -g \
                         -X GET "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/issues?orderby=id" \
@@ -249,32 +249,59 @@ jobs:
                     echo "Total de issues encontradas: $issue_count"
                     
                     echo "=============================================================================="
-                    echo "Processa cada vulnerabilidade crítica/alta e aplica tag Author"
+                    echo "Iniciando processamento das vulnerabilidades críticas/altas e aplicação da tag 'Author'"
                     echo "=============================================================================="
-
+                    
                     # Verifica se o diretório é um repositório Git
                     if ! git rev-parse --is-inside-work-tree &>/dev/null; then
-                        echo "Erro: este diretório não é um repositório Git. Abortando."
+                        echo "[ERRO] Este diretório não é um repositório Git. Abortando."
                         exit 1
                     fi
-
+                    
+                    # Lê e filtra as issues críticas/altas
                     mapfile -t issues_array < <(jq -c '.data[] | select((.enginePriority=="Critical" or .enginePriority=="High") and (.issueStatus=="Unreviewed" or .primaryTag=="Exploitable"))' "$VULN_FILE")
                     
+                    total_issues=${#issues_array[@]}
+                    echo "[INFO] Total de vulnerabilidades críticas/altas encontradas: $total_issues"
+                    
+                    if [ "$total_issues" -eq 0 ]; then
+                        echo "[INFO] Nenhuma vulnerabilidade crítica/alta para processar."
+                        exit 0
+                    fi
+                    
+                    # Loop de processamento
+                    count=0
                     for issue in "${issues_array[@]}"; do
+                        ((count++))
+                        echo "-------------------------------------------------------------------------------"
+                        echo "[INFO] Processando issue $count de $total_issues"
+                    
                         issueId=$(echo "$issue" | jq -r '.id')
                         filePath=$(echo "$issue" | jq -r '.fullFileName')
                         lineNumber=$(echo "$issue" | jq -r '.lineNumber')
                         fixedPath="${filePath#./}"
                         authorMail="N/A"
                     
+                        echo "[INFO] Issue ID: $issueId"
+                        echo "[INFO] Arquivo associado: $filePath"
+                        echo "[INFO] Linha identificada: $lineNumber"
+                    
+                        # Verifica se o arquivo existe e tenta obter o autor com git blame
                         if [ -f "$fixedPath" ] && [ "$lineNumber" != "null" ] && [ "$lineNumber" -gt 0 ]; then
+                            echo "[INFO] Executando git blame para identificar o autor..."
                             blameOutput=$(git blame -L "$lineNumber,$lineNumber" --porcelain "$fixedPath" 2>/dev/null)
                             foundMail=$(echo "$blameOutput" | grep '^author-mail' | head -n 1 | cut -d' ' -f2 | sed 's/[<>]//g')
-                            [ -n "$foundMail" ] && authorMail="$foundMail"
+                            if [ -n "$foundMail" ]; then
+                                authorMail="$foundMail"
+                                echo "[OK] Autor identificado: $authorMail"
+                            else
+                                echo "[AVISO] Nenhum autor encontrado pelo git blame para este arquivo."
+                            fi
+                        else
+                            echo "[AVISO] Arquivo não encontrado ou linha inválida ($fixedPath:$lineNumber)"
                         fi
                     
-                        echo "Issue ID: $issueId  Arquivo: $filePath  Linha: $lineNumber  Autor: $authorMail"
-                    
+                        # Monta o payload para aplicar a tag Author
                         payloadAuthor=$(jq -n --arg id "$issueId" --arg rev "$(echo "$issue" | jq -r '.revision')" \
                             --arg guid "$guid" --arg email "$authorMail" \
                             '{
@@ -287,6 +314,7 @@ jobs:
                                 }
                             }')
                     
+                        echo "[INFO] Aplicando tag 'Author' no Fortify para a issue $issueId..."
                         response=$(curl -s -w "%{http_code}" -X POST \
                             -H "Content-Type: application/json" \
                             -H "Authorization: FortifyToken $fortify_unified_login_token" \
@@ -296,14 +324,19 @@ jobs:
                         http_code="${response: -3}"
                         body="${response::-3}"
                     
-                        if [ "$http_code" != "200" ]; then
-                            echo "Erro ao aplicar tag Author na issue $issueId (HTTP $http_code)"
-                            echo "Resposta da API: $body"
+                        if [ "$http_code" == "200" ]; then
+                            echo "[OK] Tag 'Author' aplicada com sucesso na issue $issueId."
+                        else
+                            echo "[ERRO] Falha ao aplicar tag na issue $issueId (HTTP $http_code)"
+                            echo "[DEBUG] Resposta da API: $body"
                             exit 1
                         fi
                     done
                     
-                    echo "Processo concluído: todas as vulnerabilidades críticas/altas foram marcadas com o Author."
+                    echo "=============================================================================="
+                    echo "[FINALIZADO] Todas as vulnerabilidades críticas/altas foram processadas e marcadas com a tag 'Author'."
+                    echo "=============================================================================="
+
 
 
                     

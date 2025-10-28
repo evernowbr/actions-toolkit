@@ -227,31 +227,42 @@ jobs:
                     # ==========================
                     # Baixa issues do Fortify
                     # ==========================
-                    responseIssues=$(curl -s -g \
+                    responseIssues=$(curl -s -w "%{http_code}" -g \
                         -X GET "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/issues?orderby=id" \
                         -H "Accept: application/json" -H "Content-Type: application/json" \
                         -H "Authorization: FortifyToken $fortify_unified_login_token")
-
+                    
+                    http_code="${responseIssues: -3}"
+                    body="${responseIssues::-3}"
+                    
+                    if [ "$http_code" != "200" ]; then
+                        echo "Erro ao baixar issues do Fortify (HTTP $http_code)"
+                        exit 1
+                    fi
+                    
                     VULN_FILE="./fortify_vulnerabilities.json"
-                    echo "$responseIssues" > "$VULN_FILE"
-
+                    echo "$body" > "$VULN_FILE"
+                    
                     # ==========================
                     # Processa cada vulnerabilidade crítica/alta e aplica tag Author
                     # ==========================
-                    jq -c '.data[] | select((.enginePriority=="Critical" or .enginePriority=="High") and (.issueStatus=="Unreviewed" or .primaryTag=="Exploitable"))' "$VULN_FILE" |
-                    while read -r issue; do
+                    mapfile -t issues_array < <(jq -c '.data[] | select((.enginePriority=="Critical" or .enginePriority=="High") and (.issueStatus=="Unreviewed" or .primaryTag=="Exploitable"))' "$VULN_FILE")
+                    
+                    for issue in "${issues_array[@]}"; do
                         issueId=$(echo "$issue" | jq -r '.id')
                         filePath=$(echo "$issue" | jq -r '.fullFileName')
                         lineNumber=$(echo "$issue" | jq -r '.lineNumber')
                         fixedPath="${filePath#./}"
                         authorMail="N/A"
+                    
                         if [ -f "$fixedPath" ] && [ "$lineNumber" != "null" ] && [ "$lineNumber" -gt 0 ]; then
                             blameOutput=$(git blame -L "$lineNumber,$lineNumber" --porcelain "$fixedPath" 2>/dev/null)
                             foundMail=$(echo "$blameOutput" | grep '^author-mail' | head -n 1 | cut -d' ' -f2 | sed 's/[<>]//g')
                             [ -n "$foundMail" ] && authorMail="$foundMail"
                         fi
+                    
                         echo "Issue ID: $issueId  Arquivo: $filePath  Linha: $lineNumber  Autor: $authorMail"
-
+                    
                         payloadAuthor=$(jq -n --arg id "$issueId" --arg rev "$(echo "$issue" | jq -r '.revision')" \
                             --arg guid "$guid" --arg email "$authorMail" \
                             '{
@@ -263,15 +274,25 @@ jobs:
                                     hasTagComment: false
                                 }
                             }')
-
-                        curl -s -X POST \
+                    
+                        response=$(curl -s -w "%{http_code}" -X POST \
                             -H "Content-Type: application/json" \
                             -H "Authorization: FortifyToken $fortify_unified_login_token" \
                             -d "$payloadAuthor" \
-                            "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/issues/action?silent=true"
+                            "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/issues/action?silent=true")
+                    
+                        http_code="${response: -3}"
+                        body="${response::-3}"
+                    
+                        if [ "$http_code" != "200" ]; then
+                            echo "Erro ao aplicar tag Author na issue $issueId (HTTP $http_code)"
+                            echo "Resposta da API: $body"
+                            exit 1
+                        fi
                     done
-
+                    
                     echo "Processo concluído: todas as vulnerabilidades críticas/altas foram marcadas com o Author."
+
 
                     
                     echo "Iniciando processamento das regras de gate para o projeto."

@@ -220,7 +220,7 @@ jobs:
                         payload=$(echo "$body" | jq -r '.data[].guid' | jq -R . | jq -s 'map({guid:.})' | jq --arg guid "$guid" '. + [{"guid":$guid}]')
                         curl -s -X PUT -H "Authorization: FortifyToken $fortify_unified_login_token" \
                             -H "Content-Type: application/json" -d "$payload" \
-                            "$fortify_ssc_api_url/projectVersions/$PROJECT_VERSION_ID/customTags"
+                            "$fortify_ssc_api_url/projectVersions/$fortify_project_id/customTags"
                         echo "Tag Author aplicada com sucesso!"
                     fi
 
@@ -268,7 +268,7 @@ jobs:
                             -H "Content-Type: application/json" \
                             -H "Authorization: FortifyToken $fortify_unified_login_token" \
                             -d "$payloadAuthor" \
-                            "$fortify_ssc_api_url/projectVersions/$PROJECT_VERSION_ID/issues/action?silent=true"
+                            "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/issues/action?silent=true"
                     done
 
                     echo "Processo concluído: todas as vulnerabilidades críticas/altas foram marcadas com o Author."

@@ -174,9 +174,9 @@ jobs:
                     fi
 
                     echo "Iniciando git blame e set tag author"
-                    # ==========================
+                    # =========================================================================
                     # Verifica se a tag Author existe
-                    # ==========================
+                    # =========================================================================
                     echo "Verificando custom tags no Fortify..."
 
                     response=$(curl -s -w "%{http_code}" -H "Authorization: FortifyToken $fortify_unified_login_token" \
@@ -195,9 +195,9 @@ jobs:
                     fi
                     echo "Tag 'Author' encontrada! GUID: $guid"
 
-                    # ==========================
+                    # ==============================================================================
                     # Verifica se a tag Author já está aplicada ao projeto
-                    # ==========================
+                    # ==============================================================================
                     echo "Verificando se a tag Author está aplicada ao projeto..."
 
                     response=$(curl -s -w "%{http_code}" -H "Authorization: FortifyToken $fortify_unified_login_token" \
@@ -224,9 +224,9 @@ jobs:
                         echo "Tag Author aplicada com sucesso!"
                     fi
 
-                    # ==========================
+                    # ==============================================================================
                     # Baixa issues do Fortify
-                    # ==========================
+                    # ==============================================================================
                     responseIssues=$(curl -s -w "%{http_code}" -g \
                         -X GET "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/issues?orderby=id" \
                         -H "Accept: application/json" -H "Content-Type: application/json" \
@@ -243,9 +243,15 @@ jobs:
                     VULN_FILE="./fortify_vulnerabilities.json"
                     echo "$body" > "$VULN_FILE"
                     
-                    # ==========================
+                    # Conta quantas issues foram encontradas no JSON retornado
+                    issue_count=$(echo "$body" | jq '.count // 0')
+                    
+                    echo "Arquivo salvo em: $VULN_FILE"
+                    echo "Total de issues encontradas: $issue_count"
+                    
+                    # ==============================================================================
                     # Processa cada vulnerabilidade crítica/alta e aplica tag Author
-                    # ==========================
+                    # ==============================================================================
                     mapfile -t issues_array < <(jq -c '.data[] | select((.enginePriority=="Critical" or .enginePriority=="High") and (.issueStatus=="Unreviewed" or .primaryTag=="Exploitable"))' "$VULN_FILE")
                     
                     for issue in "${issues_array[@]}"; do

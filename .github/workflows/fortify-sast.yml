@@ -201,7 +201,7 @@ jobs:
                     echo "Verificando se a tag Author está aplicada ao projeto..."
 
                     response=$(curl -s -w "%{http_code}" -H "Authorization: FortifyToken $fortify_unified_login_token" \
-                    "$fortify_ssc_api_url/projectVersions/$PROJECT_VERSION_ID/customTags?start=0&limit=100")
+                    "$fortify_ssc_api_url/projectVersions/$fortify_project_id/customTags?start=0&limit=100")
 
                     code="${response: -3}"
                     body="${response::-3}"
@@ -228,7 +228,7 @@ jobs:
                     # Baixa issues do Fortify
                     # ==========================
                     responseIssues=$(curl -s -g \
-                        -X GET "$fortify_ssc_api_url/projectVersions/$PROJECT_VERSION_ID/issues?orderby=id" \
+                        -X GET "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/issues?orderby=id" \
                         -H "Accept: application/json" -H "Content-Type: application/json" \
                         -H "Authorization: FortifyToken $fortify_unified_login_token")
 

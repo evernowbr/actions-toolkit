@@ -223,7 +223,7 @@ jobs:
                   # ----------------------------------------------------
                   echo "[INFO] Verificando Custom Tags aplicadas atualmente para o projeto: Project Name - Project Version"
                   response=$(curl -s -w "%{http_code}" -H "Authorization: FortifyToken $fortify_unified_login_token" \
-                    "$fortify_ssc_api_url/projectVersions/$PROJECT_VERSION_ID/customTags?start=0&limit=100")
+                    "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/customTags?start=0&limit=100")
 
                   code="${response: -3}"
                   body="${response::-3}"
@@ -250,7 +250,7 @@ jobs:
 
                       curl -s -X PUT -H "Authorization: FortifyToken $fortify_unified_login_token" \
                           -H "Content-Type: application/json" -d "$payload" \
-                          "$fortify_ssc_api_url/projectVersions/$PROJECT_VERSION_ID/customTags"
+                          "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/customTags"
 
                       echo "[OK] Custom Tag 'Author' aplicada com sucesso!"
                   fi
@@ -263,7 +263,7 @@ jobs:
                   echo ""
                   echo "[INFO] Gerando relatório de issues para o Projeto..."
                   responseIssues=$(curl -s -w "%{http_code}" -H "Authorization: FortifyToken $fortify_unified_login_token" \
-                    "$fortify_ssc_api_url/projectVersions/$PROJECT_VERSION_ID/issues?orderby=id")
+                    "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/issues?orderby=id")
 
                   code="${responseIssues: -3}"
                   body="${responseIssues::-3}"

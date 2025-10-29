@@ -172,108 +172,226 @@ jobs:
                   output=$($fortify_scancentral_tool -ssctoken $fortify_controller_token -url $fortify_controller_url start -sargs "-Xmx2G" -skipBuild -block --log-file fortify.log --overwrite -application $fortify_project_name -version $fortify_version_name --upload-to-ssc --ssc-upload-token $fortify_controller_token 2>&1 | tee /dev/stderr )
                   exit_code=$?
                   fortify_verificar_codigo_de_resposta
-                  # ----------------------------------------------------------
-                  # Processamento de vulnerabilidades críticas/altas e aplicação da tag 'Author'
-                  # ----------------------------------------------------------
                   
+                  # ======================================================================================================================================
+                  # Script: fortify-set-tag-author.sh
+                  # Objetivo: Verificar e aplicar a tag 'Author' em um projeto Fortify e após isso aplicar o Author para cada issue encontrada
+                  # ======================================================================================================================================
+
+                  # ----------------------------------------------------
+                  # Aplica a Custom Tag 'Author' em cada issue
+                  # ----------------------------------------------------
+                  # Para cada issue encontrada, o commit correspondente será consultado
+                  # e o e-mail do desenvolvedor responsável será registrado na Custom Tag 'Author'.
+
+                  echo "=================================================================="
+                  echo "Iniciando script: ./fortify-set-tag-author.sh"
+                  echo "=================================================================="
                   echo ""
-                  echo "======================================================================="
-                  echo "Processamento de vulnerabilidades críticas/altas e aplicação da tag 'Author'"
-                  echo "======================================================================="
-                  
-                  # Verifica se o diretório é um repositório Git
-                  echo "→ Verificando se o diretório é um repositório Git..."
-                  if ! git rev-parse --is-inside-work-tree &>/dev/null; then
-                      echo "Este diretório não é um repositório Git. Abortando."
+
+                  # NECESSÁRIO ADICIONAR ESSE NO SCRIPT DA TELEFONICA - INÍCIO
+
+                  # ----------------------------------------------------
+                  # Verifica se a tag "Author" existe no Fortify
+                  # ----------------------------------------------------
+                  echo "[INFO] Verificando se a Custom Tag 'Author' está definida no Fortify..."
+                  response=$(curl -s -w "%{http_code}" -H "Authorization: FortifyToken $fortify_unified_login_token" \
+                    "$fortify_ssc_api_url/customTags?start=0&limit=100&q=hidden%3Afalse")
+
+                  code="${response: -3}"
+                  body="${response::-3}"
+
+                  if [ "$code" != "200" ]; then
+                      echo "[ERRO] Falha ao consultar Custom Tags no Fortify (HTTP $code)"
                       exit 1
                   fi
-                  echo "Diretório é um repositório Git."
-                  
-                  # Lê e filtra as issues críticas/altas
-                  echo "→ Filtrando issues críticas/altas (Critical/High e Unreviewed/Exploitable)..."
-                  mapfile -t issues_array < <(jq -c '.data[] | select((.enginePriority=="Critical" or .enginePriority=="High") and (.issueStatus=="Unreviewed" or .primaryTag=="Exploitable"))' "$VULN_FILE")
-                  total_issues=${#issues_array[@]}
-                  echo "Total de vulnerabilidades críticas/altas encontradas: $total_issues"
-                  
-                  if [ "$total_issues" -eq 0 ]; then
-                      echo "Nenhuma vulnerabilidade crítica/alta para processar."
-                      exit 0
+
+                  echo "$body" | jq empty >/dev/null 2>&1 || { echo "[ERRO] JSON inválido recebido"; exit 1; }
+
+                  guid=$(echo "$body" | jq -r '.data[] | select(.name=="Author" and .customTagType=="CUSTOM") | .guid')
+
+                  if [ -z "$guid" ]; then
+                      echo "[INFO] Custom Tag 'Author' com tipo 'CUSTOM' não encontrada."
+                      exit 1
                   fi
-                  
-                  # Loop de processamento
-                  count=0
-                  for issue in "${issues_array[@]}"; do
-                      ((count++))
-                      echo ""
-                      echo "----------------------------------------------------------------------"
-                      echo "Processando issue $count de $total_issues"
-                      echo "----------------------------------------------------------------------"
-                  
-                      issueId=$(echo "$issue" | jq -r '.id')
+
+                  echo "[OK] Custom Tag 'Author' está definida no Fortify. GUID: $guid"
+                  echo ""
+
+                  # ----------------------------------------------------
+                  # Verifica as custom tags aplicadas atualmente no projeto
+                  # ----------------------------------------------------
+                  echo "[INFO] Verificando Custom Tags aplicadas atualmente para o projeto: Project Name - Project Version"
+                  response=$(curl -s -w "%{http_code}" -H "Authorization: FortifyToken $fortify_unified_login_token" \
+                    "$fortify_ssc_api_url/projectVersions/$PROJECT_VERSION_ID/customTags?start=0&limit=100")
+
+                  code="${response: -3}"
+                  body="${response::-3}"
+
+                  if [ "$code" != "200" ]; then
+                      echo "[ERRO] Falha ao consultar Custom tags do projeto (HTTP $code)"
+                      exit 1
+                  fi
+
+                  echo "$body" | jq empty >/dev/null 2>&1 || { echo "[ERRO] JSON inválido recebido"; exit 1; }
+                  echo "$body" | jq -r '.data[] | "GUID: \(.guid) | Nome: \(.name // "N/A") | Tipo: \(.customTagType // "N/A")"'
+                  echo ""
+
+                  # ----------------------------------------------------
+                  # Aplica a tag: 'Author' se não estiver aplicada
+                  # ----------------------------------------------------
+                  aplicada=$(echo "$body" | jq -r --arg guid "$guid" '.data[] | select(.guid==$guid) | .guid')
+
+                  if [ -n "$aplicada" ]; then
+                      echo "[INFO] A Custom Tag 'Author' já está habilitada no projeto."
+                  else
+                      echo "[INFO] A Custom Tag 'Author' ainda não está habilitada. Aplicando..."
+                      payload=$(echo "$body" | jq -r '.data[].guid' | jq -R . | jq -s 'map({guid:.})' | jq --arg guid "$guid" '. + [{"guid":$guid}]')
+
+                      curl -s -X PUT -H "Authorization: FortifyToken $fortify_unified_login_token" \
+                          -H "Content-Type: application/json" -d "$payload" \
+                          "$fortify_ssc_api_url/projectVersions/$PROJECT_VERSION_ID/customTags"
+
+                      echo "[OK] Custom Tag 'Author' aplicada com sucesso!"
+                  fi
+
+                  # NECESSÁRIO ADICIONAR ESSE NO SCRIPT DA TELEFONICA - FIM
+
+                  # ----------------------------------------------------
+                  # Gera o Relatório de issues para o Projeto e faz o Git Blame
+                  # ----------------------------------------------------
+                  echo ""
+                  echo "[INFO] Gerando relatório de issues para o Projeto..."
+                  responseIssues=$(curl -s -w "%{http_code}" -H "Authorization: FortifyToken $fortify_unified_login_token" \
+                    "$fortify_ssc_api_url/projectVersions/$PROJECT_VERSION_ID/issues?orderby=id")
+
+                  code="${responseIssues: -3}"
+                  body="${responseIssues::-3}"
+
+                  if [ "$code" != "200" ]; then
+                      echo "[ERRO] Falha ao gerar relatório de isuues no Fortify (HTTP $code)"
+                      exit 1
+                  fi
+
+                  echo "$body" | jq empty >/dev/null 2>&1 || { echo "[ERRO] JSON inválido recebido"; exit 1; }
+
+                  # echo "$body" | jq .
+
+                  VULN_FILE_ABSOLUTE_PATH="./responseIssues.json"
+                  echo "$body" > "$VULN_FILE_ABSOLUTE_PATH"
+
+                  issueCount=$(echo $body | jq --raw-output '.data | map({"prioridade": .enginePriority, "avaliado": .issueStatus, "situacoes": .primaryTag, "count": 1})')
+
+                  ## -> Variables for not reviewed vulnerabilities
+                  criticalNotReviewed=$(echo $issueCount | jq '[.[] | select(.prioridade == "Critical" and .avaliado == "Unreviewed")] | map(.count) | add // 0' || echo "0")
+                  highNotReviewed=$(echo $issueCount | jq '[.[] | select(.prioridade == "High" and .avaliado == "Unreviewed")] | map(.count) | add // 0' || echo "0")
+
+                  ## -> Variables for exploitable vulnerabilities
+                  criticalExploitable=$(echo $issueCount | jq '[.[] | select(.prioridade == "Critical" and .situacoes == "Exploitable")] | map(.count) | add // 0' || echo "0")
+                  highExploitable=$(echo $issueCount | jq '[.[] | select(.prioridade == "High" and .situacoes == "Exploitable")] | map(.count) | add // 0' || echo "0")
+
+                  ## -> Variables for Risk Accepted
+                  criticalRiskAccepted=$(echo $issueCount | jq '[.[] | select(.prioridade == "Critical" and .avaliado != "Unreviewed" and .situacoes != "Exploitable")] | map(.count) | add // 0' || echo "0")
+                  highRiskAccepted=$(echo $issueCount | jq '[.[] | select(.prioridade == "High" and .avaliado != "Unreviewed" and .situacoes != "Exploitable")] | map(.count) | add // 0' || echo "0")
+
+                  ## -> Variables for medium and low vulnerabilities
+                  medium=$(echo $issueCount | jq '[.[] | select(.prioridade == "Medium")] | map(.count) | add // 0' || echo "0")
+                  low=$(echo $issueCount | jq '[.[] | select(.prioridade == "Low")] | map(.count) | add // 0' || echo "0")
+
+                  totalVulnerabilities=$((criticalNotReviewed + highNotReviewed + criticalExploitable + highExploitable))
+
+                  if [[ $totalVulnerabilities -gt 0 ]]; then
+                  echo "[WARN] Critical and/or high vulnerabilities were found in this project. Number of identified violations: ${totalVulnerabilities}"
+                  else
+                  echo "[INFO] No violations identified"
+                  fi
+                  echo ""
+                  echo "[INFO] Blocking vulnerabilities report with Author"
+
+                  if [ ! -f "$VULN_FILE_ABSOLUTE_PATH" ]; then
+                      echo "##[warning]Vulnerability report file not found at '$VULN_FILE_ABSOLUTE_PATH'."
+                  else
+                      jq -c '.data[] | select((.enginePriority == "Critical" or .enginePriority == "High") and (.issueStatus == "Unreviewed" or .primaryTag == "Exploitable"))' "$VULN_FILE_ABSOLUTE_PATH" |
+                      while read -r issue; do
+                      # Extract all necessary fields for the report
                       filePath=$(echo "$issue" | jq -r '.fullFileName')
                       lineNumber=$(echo "$issue" | jq -r '.lineNumber')
-                      fixedPath="${filePath#./}"
+                      issueName=$(echo "$issue" | jq -r '.issueName')
+                      repoName="$GITHUB_REPOSITORY" # Alterar de acordo com a pipeline do Github
+                      enginePriority=$(echo "$issue" | jq -r '.enginePriority')
+                      primaryLocation=$(echo "$issue" | jq -r '.primaryLocation')
+                      issueId=$(echo "$issue" | jq -r '.id')
+                      revision=$(echo "$issue" | jq -r '.revision')
+                      
+                      # Prepare path for git blame and set default author
+                      fixedPath="${filePath#$repoName/}"
                       authorMail="N/A"
-                  
-                      echo "→ Issue ID: $issueId"
-                      echo "→ Arquivo associado: $filePath"
-                      echo "→ Linha identificada: $lineNumber"
-                  
-                      # Verifica se o arquivo existe e tenta obter o autor com git blame
+
                       if [ -f "$fixedPath" ] && [ "$lineNumber" != "null" ] && [ "$lineNumber" -gt 0 ]; then
-                          echo "→ Executando git blame para identificar o autor..."
                           blameOutput=$(git blame -L "$lineNumber,$lineNumber" --porcelain "$fixedPath" 2>/dev/null)
                           foundMail=$(echo "$blameOutput" | grep '^author-mail' | head -n 1 | cut -d' ' -f2 | sed 's/[<>]//g')
                           if [ -n "$foundMail" ]; then
-                              authorMail="$foundMail"
-                              echo "Autor identificado: $authorMail"
-                          else
-                              echo "Nenhum autor encontrado pelo git blame para este arquivo."
+                          authorMail=$foundMail
                           fi
-                      else
-                          echo "Arquivo não encontrado ou linha inválida ($fixedPath:$lineNumber)"
                       fi
-                  
-                      # Monta payload e aplica tag Author
-                      echo "→ Aplicando tag 'Author' no Fortify para a issue $issueId..."
-                      payloadAuthor=$(jq -n --arg id "$issueId" --arg rev "$(echo "$issue" | jq -r '.revision')" \
-                          --arg guid "$guid" --arg email "$authorMail" \
-                          '{
-                              type: "AUDIT_ISSUE",
-                              values: {
-                                  issues: [{id: ($id|tonumber), revision: ($rev|tonumber)}],
-                                  customTagAudit: [{customTagGuid: $guid, textValue: $email}],
-                                  comment: "",
-                                  hasTagComment: false
-                              }
-                          }')
-                  
-                      response=$(curl -s -w "%{http_code}" -X POST \
-                          -H "Content-Type: application/json" \
-                          -H "Authorization: FortifyToken $fortify_unified_login_token" \
-                          -d "$payloadAuthor" \
-                          "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/issues/action?silent=true")
-                  
-                      http_code="${response: -3}"
-                      body="${response::-3}"
-                  
-                      if [ "$http_code" == "200" ]; then
-                          echo "Tag 'Author' aplicada com sucesso na issue $issueId."
-                      else
-                          echo "Falha ao aplicar tag na issue $issueId (HTTP $http_code)"
-                          echo "DEBUG: Resposta da API: $body"
-                          exit 1
-                      fi
-                  done
-                  
+
+                      # Print the integrated report entry for this vulnerability
+                      echo "Severity: ${enginePriority}"
+                      echo "File: ${primaryLocation}"
+                      echo "Line: ${lineNumber}"
+                      echo "Issue Name: ${issueName}"
+                      echo -e "Author: \033[0;32m${authorMail}\033[0m"
+                      echo "Project ID: '${fortify_project_version_id}'" # alterar de acordo com a variável do GitHub
+                      echo "Issue ID: ${issueId}"
+                      echo "Revision: ${revision}"
+                      echo "----------------------------------------------"
+                      done
+                  fi
+
+                  # NECESSÁRIO ADICIONAR ESSE NO SCRIPT DA TELEFONICA - INÍCIO
+
+                  # ----------------------------------------------------
+                  # Aplica a Custom Tag 'Author' em cada issue
+                  # ----------------------------------------------------
+                  echo "Aplicando a Custom Tag Author "
+
+                  # payloadAuthor=$(jq -n --arg id "$issueId" --arg rev "$(echo "$issue" | jq -r '.revision')" \
+                  #     --arg guid "$guid" --arg email "$authorMail" \
+                  #     '{
+                  #         type: "AUDIT_ISSUE",
+                  #         values: {
+                  #             issues: [{id: ($id|tonumber), revision: ($rev|tonumber)}],
+                  #             customTagAudit: [{customTagGuid: $guid, textValue: $email}],
+                  #             comment: "",
+                  #             hasTagComment: false
+                  #         }
+                  #     }')
+
+                  # response=$(curl -s -w "%{http_code}" -X POST \
+                  #     -H "Content-Type: application/json" \
+                  #     -H "Authorization: FortifyToken $fortify_unified_login_token" \
+                  #     -d "$payloadAuthor" \
+                  #     "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/issues/action?silent=true")
+
+                  # http_code="${response: -3}"
+                  # body="${response::-3}"
+
+                  # if [ "$http_code" == "200" ]; then
+                  #     echo "Tag 'Author' aplicada com sucesso na issue $issueId."
+                  # else
+                  #     echo "Falha ao aplicar tag na issue $issueId (HTTP $http_code)"
+                  #     echo "DEBUG: Resposta da API: $body"
+                  #     exit 1
+                  # fi
+                  # done
+                        
                   echo ""
-                  echo "======================================================================="
-                  echo "Todas as vulnerabilidades críticas/altas foram processadas e tag 'Author' aplicada."
-                  echo "======================================================================="
-                  
-                  # ----------------------------------------------------------
-                  # Processamento de regras de gate
-                  # ----------------------------------------------------------
+                  echo "=================================================================="
+                  echo "Script finalizado."
+                  echo "=================================================================="
+
+
+                  # NECESSÁRIO ADICIONAR ESSE NO SCRIPT DA TELEFONICA - FIM
                   
                   echo ""
                   echo "======================================================================="

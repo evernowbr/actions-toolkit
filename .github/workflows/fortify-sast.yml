@@ -49,11 +49,9 @@ jobs:
           fortify_controller_url: ${{ secrets.FORTIFY_CONTROLLER_URL }}
           fortify_controller_token: ${{ secrets.FORTIFY_CONTROLLER_TOKEN }}
         run: |
-            echo ""
             echo "======================================================================="
             echo "Iniciando configurações inicias para o Fortify SAST"
             echo "======================================================================="
-            echo ""
 
             echo "Adicionando Fortify Client ao PATH..."
             echo "export PATH=\$PATH:/opt/Fortify_ScanCentral_Client_25.2.0_x64/bin" >> /home/github-runner/.bashrc
@@ -112,7 +110,6 @@ jobs:
 
             # Configura o projeto
             fortify_configurar_projeto() {
-                echo ""
                 echo "Configurando parâmetros adicionais do projeto..."
                 fortify_parametros='{"requests":[{"uri":"'$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/attributes'","httpVerb":"PUT","postData":[{"values":[{"guid":"New"}],"attributeDefinitionId":5},{"values":[{"guid":"Internal"}],"attributeDefinitionId":6},{"values":[{"guid":"internalnetwork"}],"attributeDefinitionId":7}]},{"uri":"'$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/authEntities'","httpVerb":"PUT","postData":[]},{"uri":"'$fortify_ssc_api_url/projectVersions/$fortify_project_version_id?hideProgress=true'","httpVerb":"PUT","postData":{"committed":true}}]}'
                 response=$(curl -sS -k -X POST --header "Content-Type: application/json" --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/bulk" -d "$fortify_parametros")
@@ -130,7 +127,6 @@ jobs:
 
             # Configura as regras de processamento
             fortify_regras_processamento() {
-                echo ""
                 echo "Aplicando regras de processamento de resultados..."
                 response=$(curl -sS -k -X PUT --header "Content-Type: application/json" --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/resultProcessingRules" -d '[{"identifier": "com.fortify.manager.BLL.processingrules.BuildProjectProcessingRule","displayName": "Require approval if Build Project differs","enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.FileCountProcessingRule","displayName": "Require approval if file count differs by >10%","enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.LOCCountProcessingRule","displayName": "Require approval if line count differs by >10%","enabled": false}]')
                 exit_code=$?
@@ -159,21 +155,17 @@ jobs:
             fortify_configurar_projeto
             fortify_regras_processamento
 
-            echo ""
             echo "======================================================================="
             echo "Executando ScanCentral Client"
             echo "======================================================================="
-            echo ""
             output=$($fortify_scancentral_tool -ssctoken $fortify_controller_token -url $fortify_controller_url start -sargs "-Xmx2G" -skipBuild -block --log-file fortify.log --overwrite -application $fortify_project_name -version $fortify_version_name --upload-to-ssc --ssc-upload-token $fortify_controller_token 2>&1 | tee /dev/stderr )
             exit_code=$?
             fortify_verificar_codigo_de_resposta
             
             # Aplica a Custom Tag 'Author' em cada issue
-            echo ""
             echo "=================================================================="
             echo "Iniciando a configuraçaõ da Custom Tag 'Author'"
             echo "=================================================================="
-            echo ""
 
             # Verifica se a tag "Author" existe no Fortify
             echo "Verificando se a Custom Tag 'Author' está definida no Fortify..."
@@ -198,10 +190,9 @@ jobs:
             fi
 
             echo "Custom Tag 'Author' está definida no Fortify. GUID: $guid"
-            echo ""
 
             # Verifica as custom tags aplicadas atualmente no projeto
-            echo "[INFO] Verificando Custom Tags aplicadas atualmente para o projeto: Project Name - Project Version"
+            echo "Verificando Custom Tags aplicadas atualmente para o projeto: Project Name - Project Version"
             response=$(curl -s -w "%{http_code}" -H "Authorization: FortifyToken $fortify_unified_login_token" \
             "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/customTags?start=0&limit=100")
 
@@ -232,12 +223,9 @@ jobs:
 
                 echo "Custom Tag 'Author' aplicada com sucesso!"
             fi
-
-            echo ""
             echo "=================================================================="
             echo "Gera o Relatório de issues para o Projeto e executa o Git Blame"
             echo "=================================================================="
-            echo ""
 
             echo "Gerando relatório de issues para o Projeto..."
             responseIssues=$(curl -s -w "%{http_code}" -H "Authorization: FortifyToken $fortify_unified_login_token" \
@@ -283,7 +271,6 @@ jobs:
             else
             echo "No violations identified"
             fi
-            echo ""
             echo "Blocking vulnerabilities report with Author"
 
             if [ ! -f "$VULN_FILE_ABSOLUTE_PATH" ]; then
@@ -326,11 +313,9 @@ jobs:
                 done
             fi
 
-            echo ""
             echo "=================================================================="
             echo "Aplica a Custom Tag 'Author' em cada issue"
             echo "=================================================================="
-            echo ""
             echo "Aplicando a Custom Tag Author "
 
             # payloadAuthor=$(jq -n --arg id "$issueId" --arg rev "$(echo "$issue" | jq -r '.revision')" \

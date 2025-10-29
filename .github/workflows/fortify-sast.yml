@@ -308,11 +308,7 @@ jobs:
                 echo "Project ID: '${fortify_project_version_id}'" 
                 echo "Issue ID: ${issueId}"
                 echo "Revision: ${revision}"
-                echo "----------------------------------------------"
-
                 echo "Atribuindo o autor '${authorMail}' à Custom Tag 'Author' na issue ${issueId}."
-
-                
                 payloadCustomTag=$(jq -n --arg id "$issueId" --arg rev "$(echo "$issue" | jq -r '.revision')" \
                     --arg guid "$guid" --arg email "$authorMail" \
                     '{
@@ -326,7 +322,6 @@ jobs:
                     }')
                 
                 # Chamada para aplicar a Custom Tag Author
-
                 response=$(curl -s -w "%{http_code}" -X POST \
                     -H "Content-Type: application/json" \
                     -H "Authorization: FortifyToken $fortify_unified_login_token" \
@@ -344,11 +339,12 @@ jobs:
                     echo "Resposta da API: $body"
                     exit 1
                 fi
+                echo "----------------------------------------------"
                 done
             fi
               
             echo "======================================================================="
-            echo "Processamento das regras de gate para o projeto"
+            echo "Executando Fortify Security Gate"
             echo "======================================================================="
             
             regras_json='[

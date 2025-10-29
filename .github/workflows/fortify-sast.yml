@@ -1,539 +1,452 @@
 name: Fortify SAST
 
 on:
-    workflow_call:
-        inputs:
-            name:
-                required: true
-                type: string
-            version:
-                required: true
-                type: string
-            fortify_scancentral_tool:
-                required: true
-                type: string
-            fortify_translate_name:
-                required: true
-                type: string
-            fortify_translate_additional_flags:
-                required: true
-                type: string
-        secrets:
-            FORTIFY_SSC_API_URL:
-                required: true
-            FORTIFY_UNIFIED_LOGIN_TOKEN:
-                required: true
-            FORTIFY_CONTROLLER_URL:
-                required: true
-            FORTIFY_CONTROLLER_TOKEN:
-                required: true
+workflow_call:
+inputs:
+name:
+required: true
+type: string
+version:
+required: true
+type: string
+fortify_scancentral_tool:
+required: true
+type: string
+fortify_translate_name:
+required: true
+type: string
+fortify_translate_additional_flags:
+required: true
+type: string
+secrets:
+FORTIFY_SSC_API_URL:
+required: true
+FORTIFY_UNIFIED_LOGIN_TOKEN:
+required: true
+FORTIFY_CONTROLLER_URL:
+required: true
+FORTIFY_CONTROLLER_TOKEN:
+required: true
 
 jobs:
-    scan:
-        name: Fortify SAST
-        runs-on: self-hosted
+scan:
+name: Fortify SAST
+runs-on: self-hosted
 
-        steps:
-            - name: Checkout do repositório
-              uses: actions/checkout@v4
+steps:
+- name: Checkout do repositório
+uses: actions/checkout@v4
 
-            - name: Run Scan
-              env:
-                  fortify_project_name: ${{ inputs.name }}
-                  fortify_version_name: ${{ inputs.version }}
-                  fortify_translate_name: ${{ inputs.fortify_translate_name }}
-                  fortify_scancentral_tool: ${{ inputs.fortify_scancentral_tool }}
-                  fortify_translate_additional_flags: ${{ inputs.fortify_translate_additional_flags }}
-                  fortify_ssc_api_url: ${{ secrets.FORTIFY_SSC_API_URL }}
-                  fortify_unified_login_token: ${{ secrets.FORTIFY_UNIFIED_LOGIN_TOKEN }}
-                  fortify_controller_url: ${{ secrets.FORTIFY_CONTROLLER_URL }}
-                  fortify_controller_token: ${{ secrets.FORTIFY_CONTROLLER_TOKEN }}
-              run: |
-                  echo ""
-                  echo "======================================================================="
-                  echo "Iniciando pipeline Fortify SAST"
-                  echo "======================================================================="
-                  echo ""
+- name: Run Scan
+env:
+fortify_project_name: ${{ inputs.name }}
+fortify_version_name: ${{ inputs.version }}
+fortify_translate_name: ${{ inputs.fortify_translate_name }}
+fortify_scancentral_tool: ${{ inputs.fortify_scancentral_tool }}
+fortify_translate_additional_flags: ${{ inputs.fortify_translate_additional_flags }}
+fortify_ssc_api_url: ${{ secrets.FORTIFY_SSC_API_URL }}
+fortify_unified_login_token: ${{ secrets.FORTIFY_UNIFIED_LOGIN_TOKEN }}
+fortify_controller_url: ${{ secrets.FORTIFY_CONTROLLER_URL }}
+fortify_controller_token: ${{ secrets.FORTIFY_CONTROLLER_TOKEN }}
+run: |
+                 echo ""
+                 echo "======================================================================="
+                 echo "Iniciando pipeline Fortify SAST"
+                 echo "======================================================================="
+                 echo ""
 
-                  echo "Adicionando Fortify Client ao PATH..."
-                  echo "export PATH=\$PATH:/opt/Fortify_ScanCentral_Client_25.2.0_x64/bin" >> /home/github-runner/.bashrc
-                  source ~/.bashrc
+                 echo "Adicionando Fortify Client ao PATH..."
+                 echo "export PATH=\$PATH:/opt/Fortify_ScanCentral_Client_25.2.0_x64/bin" >> /home/github-runner/.bashrc
+                 source ~/.bashrc
 
-                  # ----------------------------------------------------------
-                  # Funções auxiliares
-                  # ----------------------------------------------------------
-                  fortify_verificar_resposta_api() {
-                      if [ "$exit_code" == "0" ] || [ "$exit_code" == "" ]; then
-                          responseCode=$(echo "$response" | jq '.responseCode')
-                          if [ "$responseCode" != "200" ] && [ "$responseCode" != "201" ]; then
-                              echo "Erro: Código de retorno diferente de 200."
-                              echo "Código retornado: $responseCode"
-                              echo "Resposta da API: $response"
-                              exit 1
-                          fi
-                      else
-                          echo "Comando retornou código $exit_code"
-                          echo "Mensagem de erro: $response"
-                          exit $exit_code
-                      fi
-                  }
+                 # ----------------------------------------------------------
+                 # Funções auxiliares
+                 # ----------------------------------------------------------
+                 fortify_verificar_resposta_api() {
+                     if [ "$exit_code" == "0" ] || [ "$exit_code" == "" ]; then
+                         responseCode=$(echo "$response" | jq '.responseCode')
+                         if [ "$responseCode" != "200" ] && [ "$responseCode" != "201" ]; then
+                             echo "Erro: Código de retorno diferente de 200."
+                             echo "Código retornado: $responseCode"
+                             echo "Resposta da API: $response"
+                             exit 1
+                         fi
+                     else
+                         echo "Comando retornou código $exit_code"
+                         echo "Mensagem de erro: $response"
+                         exit $exit_code
+                     fi
+                 }
 
-                  fortify_verificar_codigo_de_resposta() {
-                      if [ "$exit_code" != "0" ]; then
-                          echo "Comando retornou código $exit_code"
-                          exit $exit_code
-                      fi
-                  }
+                 fortify_verificar_codigo_de_resposta() {
+                     if [ "$exit_code" != "0" ]; then
+                         echo "Comando retornou código $exit_code"
+                         exit $exit_code
+                     fi
+                 }
 
-                  # ----------------------------------------------------------
-                  # Criação e configuração de projeto/versão
-                  # ----------------------------------------------------------
-                  fortify_criar_projeto_e_versao() {
-                      echo ""
-                      echo "Criando projeto e versão no Fortify SSC..."
-                      fortify_project_parameters='{"project":{"name":"'$fortify_project_name'"},"issueTemplateId":"Prioritized-HighRisk-Project-Template","name":"'$fortify_version_name'","customTagValuesAutoApply":true,"autoPredict":true,"predictionPolicy":"LAB Fortify Policy"}'
-                      response=$(curl -sS -k -X POST --header "Content-Type: application/json" --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/projectVersions" -d "$fortify_project_parameters")
-                      exit_code=$?
-                      fortify_verificar_resposta_api
-                      fortify_project_id=$(echo "$response" | jq '.data.project.id')
-                      fortify_project_version_id=$(echo "$response" | jq '.data.id')
-                      echo "Projeto criado: $fortify_project_name (ID: $fortify_project_id)"
-                      echo "Versão criada: $fortify_version_name (ID: $fortify_project_version_id)"
-                  }
+                 # ----------------------------------------------------------
+                 # Criação e configuração de projeto/versão
+                 # ----------------------------------------------------------
+                 fortify_criar_projeto_e_versao() {
+                     echo ""
+                     echo "Criando projeto e versão no Fortify SSC..."
+                     fortify_project_parameters='{"project":{"name":"'$fortify_project_name'"},"issueTemplateId":"Prioritized-HighRisk-Project-Template","name":"'$fortify_version_name'","customTagValuesAutoApply":true,"autoPredict":true,"predictionPolicy":"LAB Fortify Policy"}'
+                     response=$(curl -sS -k -X POST --header "Content-Type: application/json" --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/projectVersions" -d "$fortify_project_parameters")
+                     exit_code=$?
+                     fortify_verificar_resposta_api
+                     fortify_project_id=$(echo "$response" | jq '.data.project.id')
+                     fortify_project_version_id=$(echo "$response" | jq '.data.id')
+                     echo "Projeto criado: $fortify_project_name (ID: $fortify_project_id)"
+                     echo "Versão criada: $fortify_version_name (ID: $fortify_project_version_id)"
+                 }
 
-                  fortify_criar_versao() {
-                      echo ""
-                      echo "Criando nova versão para o projeto existente..."
-                      fortify_project_parameters='{"project":{"name":"'$fortify_project_name'","id":"'$fortify_project_id'"},"issueTemplateId":"Prioritized-HighRisk-Project-Template","name": "'$fortify_version_name'"}'
-                      response=$(curl -sS -k -X POST --header "Content-Type: application/json" --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/projectVersions" -d "$fortify_project_parameters")
-                      exit_code=$?
-                      fortify_verificar_resposta_api
-                      fortify_project_version_id=$(echo "$response" | jq '.data.id')
-                      echo "Versão criada com sucesso: $fortify_version_name (ID: $fortify_project_version_id)"
-                  }
+                 fortify_criar_versao() {
+                     echo ""
+                     echo "Criando nova versão para o projeto existente..."
+                     fortify_project_parameters='{"project":{"name":"'$fortify_project_name'","id":"'$fortify_project_id'"},"issueTemplateId":"Prioritized-HighRisk-Project-Template","name": "'$fortify_version_name'"}'
+                     response=$(curl -sS -k -X POST --header "Content-Type: application/json" --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/projectVersions" -d "$fortify_project_parameters")
+                     exit_code=$?
+                     fortify_verificar_resposta_api
+                     fortify_project_version_id=$(echo "$response" | jq '.data.id')
+                     echo "Versão criada com sucesso: $fortify_version_name (ID: $fortify_project_version_id)"
+                 }
 
-                  fortify_configurar_projeto() {
-                      echo ""
-                      echo "Configurando parâmetros adicionais do projeto..."
-                      fortify_parametros='{"requests":[{"uri":"'$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/attributes'","httpVerb":"PUT","postData":[{"values":[{"guid":"New"}],"attributeDefinitionId":5},{"values":[{"guid":"Internal"}],"attributeDefinitionId":6},{"values":[{"guid":"internalnetwork"}],"attributeDefinitionId":7}]},{"uri":"'$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/authEntities'","httpVerb":"PUT","postData":[]},{"uri":"'$fortify_ssc_api_url/projectVersions/$fortify_project_version_id?hideProgress=true'","httpVerb":"PUT","postData":{"committed":true}}]}'
-                      response=$(curl -sS -k -X POST --header "Content-Type: application/json" --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/bulk" -d "$fortify_parametros")
-                      exit_code=$?
-                      fortify_verificar_resposta_api
-                      successCount=$(echo "$response" | jq '.successCount')
-                      if [ "$successCount" != "3" ]; then
-                          echo "Falha ao configurar parâmetros adicionais do projeto."
-                          echo "Resposta da API: $response"
-                          exit 1
-                      else
-                          echo "Parâmetros adicionais configurados com sucesso."
-                      fi
-                  }
+                 fortify_configurar_projeto() {
+                     echo ""
+                     echo "Configurando parâmetros adicionais do projeto..."
+                     fortify_parametros='{"requests":[{"uri":"'$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/attributes'","httpVerb":"PUT","postData":[{"values":[{"guid":"New"}],"attributeDefinitionId":5},{"values":[{"guid":"Internal"}],"attributeDefinitionId":6},{"values":[{"guid":"internalnetwork"}],"attributeDefinitionId":7}]},{"uri":"'$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/authEntities'","httpVerb":"PUT","postData":[]},{"uri":"'$fortify_ssc_api_url/projectVersions/$fortify_project_version_id?hideProgress=true'","httpVerb":"PUT","postData":{"committed":true}}]}'
+                     response=$(curl -sS -k -X POST --header "Content-Type: application/json" --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/bulk" -d "$fortify_parametros")
+                     exit_code=$?
+                     fortify_verificar_resposta_api
+                     successCount=$(echo "$response" | jq '.successCount')
+                     if [ "$successCount" != "3" ]; then
+                         echo "Falha ao configurar parâmetros adicionais do projeto."
+                         echo "Resposta da API: $response"
+                         exit 1
+                     else
+                         echo "Parâmetros adicionais configurados com sucesso."
+                     fi
+                 }
 
-                  fortify_regras_processamento() {
-                      echo ""
-                      echo "Aplicando regras de processamento de resultados..."
-                      response=$(curl -sS -k -X PUT --header "Content-Type: application/json" --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/resultProcessingRules" -d '[{"identifier": "com.fortify.manager.BLL.processingrules.BuildProjectProcessingRule","displayName": "Require approval if Build Project differs","enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.FileCountProcessingRule","displayName": "Require approval if file count differs by >10%","enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.LOCCountProcessingRule","displayName": "Require approval if line count differs by >10%","enabled": false}]')
-                      exit_code=$?
-                      fortify_verificar_resposta_api
-                      echo "Regras de processamento configuradas com sucesso."
-                  }
+                 fortify_regras_processamento() {
+                     echo ""
+                     echo "Aplicando regras de processamento de resultados..."
+                     response=$(curl -sS -k -X PUT --header "Content-Type: application/json" --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/resultProcessingRules" -d '[{"identifier": "com.fortify.manager.BLL.processingrules.BuildProjectProcessingRule","displayName": "Require approval if Build Project differs","enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.FileCountProcessingRule","displayName": "Require approval if file count differs by >10%","enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.LOCCountProcessingRule","displayName": "Require approval if line count differs by >10%","enabled": false}]')
+                     exit_code=$?
+                     fortify_verificar_resposta_api
+                     echo "Regras de processamento configuradas com sucesso."
+                 }
 
-                  # ----------------------------------------------------------
-                  # Etapas principais
-                  # ----------------------------------------------------------
-                  echo ""
-                  echo "======================================================================="
-                  echo "Verificando existência do projeto e versão no Fortify SSC"
-                  echo "======================================================================="
-                  response=$(curl -sS -k -X GET --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/projectVersions?q=$fortify_project_name&fulltextsearch=true")
-                  exit_code=$?
-                  fortify_verificar_resposta_api
+                 # ----------------------------------------------------------
+                 # Etapas principais
+                 # ----------------------------------------------------------
+                 echo ""
+                 echo "======================================================================="
+                 echo "Verificando existência do projeto e versão no Fortify SSC"
+                 echo "======================================================================="
+                 response=$(curl -sS -k -X GET --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/projectVersions?q=$fortify_project_name&fulltextsearch=true")
+                 exit_code=$?
+                 fortify_verificar_resposta_api
 
-                  fortify_project_id=$(echo "$response" | jq '.data[] | select(.project.name=="'$fortify_project_name'") | .project.id' | head -1 | awk '{$1=$1};1')
-                  fortify_project_version_id=$(echo "$response" | jq '.data[] | select(.project.name=="'$fortify_project_name'") | select(.name=="'$fortify_version_name'") | .id' | awk '{$1=$1};1')
+                 fortify_project_id=$(echo "$response" | jq '.data[] | select(.project.name=="'$fortify_project_name'") | .project.id' | head -1 | awk '{$1=$1};1')
+                 fortify_project_version_id=$(echo "$response" | jq '.data[] | select(.project.name=="'$fortify_project_name'") | select(.name=="'$fortify_version_name'") | .id' | awk '{$1=$1};1')
 
-                  if [ "$fortify_project_version_id" != "" ]; then
-                      echo "Projeto e versão já existentes no Fortify SSC."
-                  elif [ "$fortify_project_id" != "" ]; then
-                      echo "Projeto existente, criando nova versão..."
-                      fortify_criar_versao
-                  else
-                      echo "Criando novo projeto e versão..."
-                      fortify_criar_projeto_e_versao
-                  fi
+                 if [ "$fortify_project_version_id" != "" ]; then
+                     echo "Projeto e versão já existentes no Fortify SSC."
+                 elif [ "$fortify_project_id" != "" ]; then
+                     echo "Projeto existente, criando nova versão..."
+                     fortify_criar_versao
+                 else
+                     echo "Criando novo projeto e versão..."
+                     fortify_criar_projeto_e_versao
+                 fi
 
-                  fortify_configurar_projeto
-                  fortify_regras_processamento
+                 fortify_configurar_projeto
+                 fortify_regras_processamento
 
-                  echo ""
-                  echo "======================================================================="
-                  echo "Executando ScanCentral Client"
-                  echo "======================================================================="
-                  output=$($fortify_scancentral_tool -ssctoken $fortify_controller_token -url $fortify_controller_url start -sargs "-Xmx2G" -skipBuild -block --log-file fortify.log --overwrite -application $fortify_project_name -version $fortify_version_name --upload-to-ssc --ssc-upload-token $fortify_controller_token 2>&1 | tee /dev/stderr )
-                  exit_code=$?
-                  fortify_verificar_codigo_de_resposta
-                  # ----------------------------------------------------------
-                  # Processamento de vulnerabilidades críticas/altas e aplicação da tag 'Author'
-                  # ----------------------------------------------------------
-                  
-                  # ======================================================================================================================================
-                  # Script: fortify-set-tag-author.sh
-                  # Objetivo: Verificar e aplicar a tag 'Author' em um projeto Fortify e após isso aplicar o Author para cada issue encontrada
-                  # ======================================================================================================================================
+                 echo ""
+                 echo "======================================================================="
+                 echo "Executando ScanCentral Client"
+                 echo "======================================================================="
+                 output=$($fortify_scancentral_tool -ssctoken $fortify_controller_token -url $fortify_controller_url start -sargs "-Xmx2G" -skipBuild -block --log-file fortify.log --overwrite -application $fortify_project_name -version $fortify_version_name --upload-to-ssc --ssc-upload-token $fortify_controller_token 2>&1 | tee /dev/stderr )
+                 exit_code=$?
+                 fortify_verificar_codigo_de_resposta
+                 
+                 # ======================================================================================================================================
+                 # Script: fortify-set-tag-author.sh
+                 # Objetivo: Verificar e aplicar a tag 'Author' em um projeto Fortify e após isso aplicar o Author para cada issue encontrada
+                 # ======================================================================================================================================
 
-                  # ----------------------------------------------------
-                  # Aplica a Custom Tag 'Author' em cada issue
-                  # ----------------------------------------------------
-                  # Para cada issue encontrada, o commit correspondente será consultado
-                  # e o e-mail do desenvolvedor responsável será registrado na Custom Tag 'Author'.
+                 # ----------------------------------------------------
+                 # Aplica a Custom Tag 'Author' em cada issue
+                 # ----------------------------------------------------
+                 # Para cada issue encontrada, o commit correspondente será consultado
+                 # e o e-mail do desenvolvedor responsável será registrado na Custom Tag 'Author'.
 
-                  echo "=================================================================="
-                  echo "Iniciando script: ./fortify-set-tag-author.sh"
-                  echo "=================================================================="
-                  echo ""
-                  echo "======================================================================="
-                  echo "Processamento de vulnerabilidades críticas/altas e aplicação da tag 'Author'"
-                  echo "======================================================================="
-                  
-                  # Verifica se o diretório é um repositório Git
-                  echo "→ Verificando se o diretório é um repositório Git..."
-                  if ! git rev-parse --is-inside-work-tree &>/dev/null; then
-                      echo "Este diretório não é um repositório Git. Abortando."
+                 echo "=================================================================="
+                 echo "Iniciando script: ./fortify-set-tag-author.sh"
+                 echo "=================================================================="
+                 echo ""
 
-                  # NECESSÁRIO ADICIONAR ESSE NO SCRIPT DA TELEFONICA - INÍCIO
+                 # NECESSÁRIO ADICIONAR ESSE NO SCRIPT DA TELEFONICA - INÍCIO
 
-                  # ----------------------------------------------------
-                  # Verifica se a tag "Author" existe no Fortify
-                  # ----------------------------------------------------
-                  echo "[INFO] Verificando se a Custom Tag 'Author' está definida no Fortify..."
-                  response=$(curl -s -w "%{http_code}" -H "Authorization: FortifyToken $fortify_unified_login_token" \
-                    "$fortify_ssc_api_url/customTags?start=0&limit=100&q=hidden%3Afalse")
+                 # ----------------------------------------------------
+                 # Verifica se a tag "Author" existe no Fortify
+                 # ----------------------------------------------------
+                 echo "[INFO] Verificando se a Custom Tag 'Author' está definida no Fortify..."
+                 response=$(curl -s -w "%{http_code}" -H "Authorization: FortifyToken $fortify_unified_login_token" \
+                   "$fortify_ssc_api_url/customTags?start=0&limit=100&q=hidden%3Afalse")
 
-                  code="${response: -3}"
-                  body="${response::-3}"
+                 code="${response: -3}"
+                 body="${response::-3}"
 
-                  if [ "$code" != "200" ]; then
-                      echo "[ERRO] Falha ao consultar Custom Tags no Fortify (HTTP $code)"
-                      exit 1
-                  fi
-                  echo "Diretório é um repositório Git."
-                  
-                  # Lê e filtra as issues críticas/altas
-                  echo "→ Filtrando issues críticas/altas (Critical/High e Unreviewed/Exploitable)..."
-                  mapfile -t issues_array < <(jq -c '.data[] | select((.enginePriority=="Critical" or .enginePriority=="High") and (.issueStatus=="Unreviewed" or .primaryTag=="Exploitable"))' "$VULN_FILE")
-                  total_issues=${#issues_array[@]}
-                  echo "Total de vulnerabilidades críticas/altas encontradas: $total_issues"
-                  
-                  if [ "$total_issues" -eq 0 ]; then
-                      echo "Nenhuma vulnerabilidade crítica/alta para processar."
-                      exit 0
+                 if [ "$code" != "200" ]; then
+                     echo "[ERRO] Falha ao consultar Custom Tags no Fortify (HTTP $code)"
+                     exit 1
+                 fi
 
-                  echo "$body" | jq empty >/dev/null 2>&1 || { echo "[ERRO] JSON inválido recebido"; exit 1; }
+                 echo "$body" | jq empty >/dev/null 2>&1 || { echo "[ERRO] JSON inválido recebido"; exit 1; }
 
-                  guid=$(echo "$body" | jq -r '.data[] | select(.name=="Author" and .customTagType=="CUSTOM") | .guid')
+                 guid=$(echo "$body" | jq -r '.data[] | select(.name=="Author" and .customTagType=="CUSTOM") | .guid')
 
-                  if [ -z "$guid" ]; then
-                      echo "[INFO] Custom Tag 'Author' com tipo 'CUSTOM' não encontrada."
-                      exit 1
-                  fi
-                  
-                  # Loop de processamento
-                  count=0
-                  for issue in "${issues_array[@]}"; do
-                      ((count++))
-                      echo ""
-                      echo "----------------------------------------------------------------------"
-                      echo "Processando issue $count de $total_issues"
-                      echo "----------------------------------------------------------------------"
-                  
-                      issueId=$(echo "$issue" | jq -r '.id')
+                 if [ -z "$guid" ]; then
+                     echo "[INFO] Custom Tag 'Author' com tipo 'CUSTOM' não encontrada."
+                     exit 1
+                 fi
 
-                  echo "[OK] Custom Tag 'Author' está definida no Fortify. GUID: $guid"
-                  echo ""
+                 echo "[OK] Custom Tag 'Author' está definida no Fortify. GUID: $guid"
+                 echo ""
 
-                  # ----------------------------------------------------
-                  # Verifica as custom tags aplicadas atualmente no projeto
-                  # ----------------------------------------------------
-                  echo "[INFO] Verificando Custom Tags aplicadas atualmente para o projeto: Project Name - Project Version"
-                  response=$(curl -s -w "%{http_code}" -H "Authorization: FortifyToken $fortify_unified_login_token" \
-                    "$fortify_ssc_api_url/projectVersions/$PROJECT_VERSION_ID/customTags?start=0&limit=100")
+                 # ----------------------------------------------------
+                 # Verifica as custom tags aplicadas atualmente no projeto
+                 # ----------------------------------------------------
+                 echo "[INFO] Verificando Custom Tags aplicadas atualmente para o projeto: Project Name - Project Version"
+                 response=$(curl -s -w "%{http_code}" -H "Authorization: FortifyToken $fortify_unified_login_token" \
+                    "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/customTags?start=0&limit=100")
 
-                  code="${response: -3}"
-                  body="${response::-3}"
+                 code="${response: -3}"
+                 body="${response::-3}"
 
-                  if [ "$code" != "200" ]; then
-                      echo "[ERRO] Falha ao consultar Custom tags do projeto (HTTP $code)"
-                      exit 1
-                  fi
+                 if [ "$code" != "200" ]; then
+                     echo "[ERRO] Falha ao consultar Custom tags do projeto (HTTP $code)"
+                     exit 1
+                 fi
 
-                  echo "$body" | jq empty >/dev/null 2>&1 || { echo "[ERRO] JSON inválido recebido"; exit 1; }
-                  echo "$body" | jq -r '.data[] | "GUID: \(.guid) | Nome: \(.name // "N/A") | Tipo: \(.customTagType // "N/A")"'
-                  echo ""
+                 echo "$body" | jq empty >/dev/null 2>&1 || { echo "[ERRO] JSON inválido recebido"; exit 1; }
+                 echo "$body" | jq -r '.data[] | "GUID: \(.guid) | Nome: \(.name // "N/A") | Tipo: \(.customTagType // "N/A")"'
+                 echo ""
 
-                  # ----------------------------------------------------
-                  # Aplica a tag: 'Author' se não estiver aplicada
-                  # ----------------------------------------------------
-                  aplicada=$(echo "$body" | jq -r --arg guid "$guid" '.data[] | select(.guid==$guid) | .guid')
+                 # ----------------------------------------------------
+                 # Aplica a tag: 'Author' se não estiver aplicada
+                 # ----------------------------------------------------
+                 aplicada=$(echo "$body" | jq -r --arg guid "$guid" '.data[] | select(.guid==$guid) | .guid')
 
-                  if [ -n "$aplicada" ]; then
-                      echo "[INFO] A Custom Tag 'Author' já está habilitada no projeto."
-                  else
-                      echo "[INFO] A Custom Tag 'Author' ainda não está habilitada. Aplicando..."
-                      payload=$(echo "$body" | jq -r '.data[].guid' | jq -R . | jq -s 'map({guid:.})' | jq --arg guid "$guid" '. + [{"guid":$guid}]')
+                 if [ -n "$aplicada" ]; then
+                     echo "[INFO] A Custom Tag 'Author' já está habilitada no projeto."
+                 else
+                     echo "[INFO] A Custom Tag 'Author' ainda não está habilitada. Aplicando..."
+                     payload=$(echo "$body" | jq -r '.data[].guid' | jq -R . | jq -s 'map({guid:.})' | jq --arg guid "$guid" '. + [{"guid":$guid}]')
 
-                      curl -s -X PUT -H "Authorization: FortifyToken $fortify_unified_login_token" \
-                          -H "Content-Type: application/json" -d "$payload" \
-                          "$fortify_ssc_api_url/projectVersions/$PROJECT_VERSION_ID/customTags"
+                     curl -s -X PUT -H "Authorization: FortifyToken $fortify_unified_login_token" \
+                         -H "Content-Type: application/json" -d "$payload" \
+                          "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/customTags"
 
-                      echo "[OK] Custom Tag 'Author' aplicada com sucesso!"
-                  fi
+                     echo "[OK] Custom Tag 'Author' aplicada com sucesso!"
+                 fi
 
-                  # NECESSÁRIO ADICIONAR ESSE NO SCRIPT DA TELEFONICA - FIM
+                 # NECESSÁRIO ADICIONAR ESSE NO SCRIPT DA TELEFONICA - FIM
 
-                  # ----------------------------------------------------
-                  # Gera o Relatório de issues para o Projeto e faz o Git Blame
-                  # ----------------------------------------------------
-                  echo ""
-                  echo "[INFO] Gerando relatório de issues para o Projeto..."
-                  responseIssues=$(curl -s -w "%{http_code}" -H "Authorization: FortifyToken $fortify_unified_login_token" \
-                    "$fortify_ssc_api_url/projectVersions/$PROJECT_VERSION_ID/issues?orderby=id")
+                 # ----------------------------------------------------
+                 # Gera o Relatório de issues para o Projeto e faz o Git Blame
+                 # ----------------------------------------------------
+                 echo ""
+                 echo "[INFO] Gerando relatório de issues para o Projeto..."
+                 responseIssues=$(curl -s -w "%{http_code}" -H "Authorization: FortifyToken $fortify_unified_login_token" \
+                    "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/issues?orderby=id")
 
-                  code="${responseIssues: -3}"
-                  body="${responseIssues::-3}"
+                 code="${responseIssues: -3}"
+                 body="${responseIssues::-3}"
 
-                  if [ "$code" != "200" ]; then
-                      echo "[ERRO] Falha ao gerar relatório de isuues no Fortify (HTTP $code)"
-                      exit 1
-                  fi
+                 if [ "$code" != "200" ]; then
+                     echo "[ERRO] Falha ao gerar relatório de isuues no Fortify (HTTP $code)"
+                     exit 1
+                 fi
 
-                  echo "$body" | jq empty >/dev/null 2>&1 || { echo "[ERRO] JSON inválido recebido"; exit 1; }
+                 echo "$body" | jq empty >/dev/null 2>&1 || { echo "[ERRO] JSON inválido recebido"; exit 1; }
 
-                  # echo "$body" | jq .
+                 # echo "$body" | jq .
 
-                  VULN_FILE_ABSOLUTE_PATH="./responseIssues.json"
-                  echo "$body" > "$VULN_FILE_ABSOLUTE_PATH"
+                 VULN_FILE_ABSOLUTE_PATH="./responseIssues.json"
+                 echo "$body" > "$VULN_FILE_ABSOLUTE_PATH"
 
-                  issueCount=$(echo $body | jq --raw-output '.data | map({"prioridade": .enginePriority, "avaliado": .issueStatus, "situacoes": .primaryTag, "count": 1})')
+                 issueCount=$(echo $body | jq --raw-output '.data | map({"prioridade": .enginePriority, "avaliado": .issueStatus, "situacoes": .primaryTag, "count": 1})')
 
-                  ## -> Variables for not reviewed vulnerabilities
-                  criticalNotReviewed=$(echo $issueCount | jq '[.[] | select(.prioridade == "Critical" and .avaliado == "Unreviewed")] | map(.count) | add // 0' || echo "0")
-                  highNotReviewed=$(echo $issueCount | jq '[.[] | select(.prioridade == "High" and .avaliado == "Unreviewed")] | map(.count) | add // 0' || echo "0")
+                 ## -> Variables for not reviewed vulnerabilities
+                 criticalNotReviewed=$(echo $issueCount | jq '[.[] | select(.prioridade == "Critical" and .avaliado == "Unreviewed")] | map(.count) | add // 0' || echo "0")
+                 highNotReviewed=$(echo $issueCount | jq '[.[] | select(.prioridade == "High" and .avaliado == "Unreviewed")] | map(.count) | add // 0' || echo "0")
 
-                  ## -> Variables for exploitable vulnerabilities
-                  criticalExploitable=$(echo $issueCount | jq '[.[] | select(.prioridade == "Critical" and .situacoes == "Exploitable")] | map(.count) | add // 0' || echo "0")
-                  highExploitable=$(echo $issueCount | jq '[.[] | select(.prioridade == "High" and .situacoes == "Exploitable")] | map(.count) | add // 0' || echo "0")
+                 ## -> Variables for exploitable vulnerabilities
+                 criticalExploitable=$(echo $issueCount | jq '[.[] | select(.prioridade == "Critical" and .situacoes == "Exploitable")] | map(.count) | add // 0' || echo "0")
+                 highExploitable=$(echo $issueCount | jq '[.[] | select(.prioridade == "High" and .situacoes == "Exploitable")] | map(.count) | add // 0' || echo "0")
 
-                  ## -> Variables for Risk Accepted
-                  criticalRiskAccepted=$(echo $issueCount | jq '[.[] | select(.prioridade == "Critical" and .avaliado != "Unreviewed" and .situacoes != "Exploitable")] | map(.count) | add // 0' || echo "0")
-                  highRiskAccepted=$(echo $issueCount | jq '[.[] | select(.prioridade == "High" and .avaliado != "Unreviewed" and .situacoes != "Exploitable")] | map(.count) | add // 0' || echo "0")
+                 ## -> Variables for Risk Accepted
+                 criticalRiskAccepted=$(echo $issueCount | jq '[.[] | select(.prioridade == "Critical" and .avaliado != "Unreviewed" and .situacoes != "Exploitable")] | map(.count) | add // 0' || echo "0")
+                 highRiskAccepted=$(echo $issueCount | jq '[.[] | select(.prioridade == "High" and .avaliado != "Unreviewed" and .situacoes != "Exploitable")] | map(.count) | add // 0' || echo "0")
 
-                  ## -> Variables for medium and low vulnerabilities
-                  medium=$(echo $issueCount | jq '[.[] | select(.prioridade == "Medium")] | map(.count) | add // 0' || echo "0")
-                  low=$(echo $issueCount | jq '[.[] | select(.prioridade == "Low")] | map(.count) | add // 0' || echo "0")
+                 ## -> Variables for medium and low vulnerabilities
+                 medium=$(echo $issueCount | jq '[.[] | select(.prioridade == "Medium")] | map(.count) | add // 0' || echo "0")
+                 low=$(echo $issueCount | jq '[.[] | select(.prioridade == "Low")] | map(.count) | add // 0' || echo "0")
 
-                  totalVulnerabilities=$((criticalNotReviewed + highNotReviewed + criticalExploitable + highExploitable))
+                 totalVulnerabilities=$((criticalNotReviewed + highNotReviewed + criticalExploitable + highExploitable))
 
-                  if [[ $totalVulnerabilities -gt 0 ]]; then
-                  echo "[WARN] Critical and/or high vulnerabilities were found in this project. Number of identified violations: ${totalVulnerabilities}"
-                  else
-                  echo "[INFO] No violations identified"
-                  fi
-                  echo ""
-                  echo "[INFO] Blocking vulnerabilities report with Author"
+                 if [[ $totalVulnerabilities -gt 0 ]]; then
+                 echo "[WARN] Critical and/or high vulnerabilities were found in this project. Number of identified violations: ${totalVulnerabilities}"
+                 else
+                 echo "[INFO] No violations identified"
+                 fi
+                 echo ""
+                 echo "[INFO] Blocking vulnerabilities report with Author"
 
-                  if [ ! -f "$VULN_FILE_ABSOLUTE_PATH" ]; then
-                      echo "##[warning]Vulnerability report file not found at '$VULN_FILE_ABSOLUTE_PATH'."
-                  else
-                      jq -c '.data[] | select((.enginePriority == "Critical" or .enginePriority == "High") and (.issueStatus == "Unreviewed" or .primaryTag == "Exploitable"))' "$VULN_FILE_ABSOLUTE_PATH" |
-                      while read -r issue; do
-                      # Extract all necessary fields for the report
-                      filePath=$(echo "$issue" | jq -r '.fullFileName')
-                      lineNumber=$(echo "$issue" | jq -r '.lineNumber')
-                      fixedPath="${filePath#./}"
-                      issueName=$(echo "$issue" | jq -r '.issueName')
-                      repoName="$GITHUB_REPOSITORY" # Alterar de acordo com a pipeline do Github
-                      enginePriority=$(echo "$issue" | jq -r '.enginePriority')
-                      primaryLocation=$(echo "$issue" | jq -r '.primaryLocation')
-                      issueId=$(echo "$issue" | jq -r '.id')
-                      revision=$(echo "$issue" | jq -r '.revision')
-                      
-                      # Prepare path for git blame and set default author
-                      fixedPath="${filePath#$repoName/}"
-                      authorMail="N/A"
-                  
-                      echo "→ Issue ID: $issueId"
-                      echo "→ Arquivo associado: $filePath"
-                      echo "→ Linha identificada: $lineNumber"
-                  
-                      # Verifica se o arquivo existe e tenta obter o autor com git blame
+                 if [ ! -f "$VULN_FILE_ABSOLUTE_PATH" ]; then
+                     echo "##[warning]Vulnerability report file not found at '$VULN_FILE_ABSOLUTE_PATH'."
+                 else
+                     jq -c '.data[] | select((.enginePriority == "Critical" or .enginePriority == "High") and (.issueStatus == "Unreviewed" or .primaryTag == "Exploitable"))' "$VULN_FILE_ABSOLUTE_PATH" |
+                     while read -r issue; do
+                     # Extract all necessary fields for the report
+                     filePath=$(echo "$issue" | jq -r '.fullFileName')
+                     lineNumber=$(echo "$issue" | jq -r '.lineNumber')
+                     issueName=$(echo "$issue" | jq -r '.issueName')
+                     repoName="$GITHUB_REPOSITORY" # Alterar de acordo com a pipeline do Github
+                     enginePriority=$(echo "$issue" | jq -r '.enginePriority')
+                     primaryLocation=$(echo "$issue" | jq -r '.primaryLocation')
+                     issueId=$(echo "$issue" | jq -r '.id')
+                     revision=$(echo "$issue" | jq -r '.revision')
+                     
+                     # Prepare path for git blame and set default author
+                     fixedPath="${filePath#$repoName/}"
+                     authorMail="N/A"
 
-                      if [ -f "$fixedPath" ] && [ "$lineNumber" != "null" ] && [ "$lineNumber" -gt 0 ]; then
-                          echo "→ Executando git blame para identificar o autor..."
-                          blameOutput=$(git blame -L "$lineNumber,$lineNumber" --porcelain "$fixedPath" 2>/dev/null)
-                          foundMail=$(echo "$blameOutput" | grep '^author-mail' | head -n 1 | cut -d' ' -f2 | sed 's/[<>]//g')
-                          if [ -n "$foundMail" ]; then
-                              authorMail="$foundMail"
-                              echo "Autor identificado: $authorMail"
-                          else
-                              echo "Nenhum autor encontrado pelo git blame para este arquivo."
-                          authorMail=$foundMail
-                          fi
-                      else
-                          echo "Arquivo não encontrado ou linha inválida ($fixedPath:$lineNumber)"
-                      fi
-                  
-                      # Monta payload e aplica tag Author
-                      echo "→ Aplicando tag 'Author' no Fortify para a issue $issueId..."
-                      payloadAuthor=$(jq -n --arg id "$issueId" --arg rev "$(echo "$issue" | jq -r '.revision')" \
-                          --arg guid "$guid" --arg email "$authorMail" \
-                          '{
-                              type: "AUDIT_ISSUE",
-                              values: {
-                                  issues: [{id: ($id|tonumber), revision: ($rev|tonumber)}],
-                                  customTagAudit: [{customTagGuid: $guid, textValue: $email}],
-                                  comment: "",
-                                  hasTagComment: false
-                              }
-                          }')
-                  
-                      response=$(curl -s -w "%{http_code}" -X POST \
-                          -H "Content-Type: application/json" \
-                          -H "Authorization: FortifyToken $fortify_unified_login_token" \
-                          -d "$payloadAuthor" \
-                          "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/issues/action?silent=true")
-                  
-                      http_code="${response: -3}"
-                      body="${response::-3}"
-                  
-                      if [ "$http_code" == "200" ]; then
-                          echo "Tag 'Author' aplicada com sucesso na issue $issueId."
-                      else
-                          echo "Falha ao aplicar tag na issue $issueId (HTTP $http_code)"
-                          echo "DEBUG: Resposta da API: $body"
-                          exit 1
-                      fi
-                  done
-                  
+                     if [ -f "$fixedPath" ] && [ "$lineNumber" != "null" ] && [ "$lineNumber" -gt 0 ]; then
+                         blameOutput=$(git blame -L "$lineNumber,$lineNumber" --porcelain "$fixedPath" 2>/dev/null)
+                         foundMail=$(echo "$blameOutput" | grep '^author-mail' | head -n 1 | cut -d' ' -f2 | sed 's/[<>]//g')
+                         if [ -n "$foundMail" ]; then
+                         authorMail=$foundMail
+                         fi
+                     fi
 
-                      # Print the integrated report entry for this vulnerability
-                      echo "Severity: ${enginePriority}"
-                      echo "File: ${primaryLocation}"
-                      echo "Line: ${lineNumber}"
-                      echo "Issue Name: ${issueName}"
-                      echo -e "Author: \033[0;32m${authorMail}\033[0m"
-                      echo "Project ID: '${fortify_project_version_id}'" # alterar de acordo com a variável do GitHub
-                      echo "Issue ID: ${issueId}"
-                      echo "Revision: ${revision}"
-                      echo "----------------------------------------------"
-                      done
-                  fi
+                     # Print the integrated report entry for this vulnerability
+                     echo "Severity: ${enginePriority}"
+                     echo "File: ${primaryLocation}"
+                     echo "Line: ${lineNumber}"
+                     echo "Issue Name: ${issueName}"
+                     echo -e "Author: \033[0;32m${authorMail}\033[0m"
+                     echo "Project ID: '${fortify_project_version_id}'" # alterar de acordo com a variável do GitHub
+                     echo "Issue ID: ${issueId}"
+                     echo "Revision: ${revision}"
+                     echo "----------------------------------------------"
+                     done
+                 fi
 
-                  # NECESSÁRIO ADICIONAR ESSE NO SCRIPT DA TELEFONICA - INÍCIO
+                 # NECESSÁRIO ADICIONAR ESSE NO SCRIPT DA TELEFONICA - INÍCIO
 
-                  # ----------------------------------------------------
-                  # Aplica a Custom Tag 'Author' em cada issue
-                  # ----------------------------------------------------
-                  echo "Aplicando a Custom Tag Author "
+                 # ----------------------------------------------------
+                 # Aplica a Custom Tag 'Author' em cada issue
+                 # ----------------------------------------------------
+                 echo "Aplicando a Custom Tag Author "
 
-                  # payloadAuthor=$(jq -n --arg id "$issueId" --arg rev "$(echo "$issue" | jq -r '.revision')" \
-                  #     --arg guid "$guid" --arg email "$authorMail" \
-                  #     '{
-                  #         type: "AUDIT_ISSUE",
-                  #         values: {
-                  #             issues: [{id: ($id|tonumber), revision: ($rev|tonumber)}],
-                  #             customTagAudit: [{customTagGuid: $guid, textValue: $email}],
-                  #             comment: "",
-                  #             hasTagComment: false
-                  #         }
-                  #     }')
+                 # payloadAuthor=$(jq -n --arg id "$issueId" --arg rev "$(echo "$issue" | jq -r '.revision')" \
+                 #     --arg guid "$guid" --arg email "$authorMail" \
+                 #     '{
+                 #         type: "AUDIT_ISSUE",
+                 #         values: {
+                 #             issues: [{id: ($id|tonumber), revision: ($rev|tonumber)}],
+                 #             customTagAudit: [{customTagGuid: $guid, textValue: $email}],
+                 #             comment: "",
+                 #             hasTagComment: false
+                 #         }
+                 #     }')
 
-                  # response=$(curl -s -w "%{http_code}" -X POST \
-                  #     -H "Content-Type: application/json" \
-                  #     -H "Authorization: FortifyToken $fortify_unified_login_token" \
-                  #     -d "$payloadAuthor" \
-                  #     "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/issues/action?silent=true")
+                 # response=$(curl -s -w "%{http_code}" -X POST \
+                 #     -H "Content-Type: application/json" \
+                 #     -H "Authorization: FortifyToken $fortify_unified_login_token" \
+                 #     -d "$payloadAuthor" \
+                 #     "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/issues/action?silent=true")
 
-                  # http_code="${response: -3}"
-                  # body="${response::-3}"
+                 # http_code="${response: -3}"
+                 # body="${response::-3}"
 
-                  # if [ "$http_code" == "200" ]; then
-                  #     echo "Tag 'Author' aplicada com sucesso na issue $issueId."
-                  # else
-                  #     echo "Falha ao aplicar tag na issue $issueId (HTTP $http_code)"
-                  #     echo "DEBUG: Resposta da API: $body"
-                  #     exit 1
-                  # fi
-                  # done
-                        
-                  echo ""
-                  echo "======================================================================="
-                  echo "Todas as vulnerabilidades críticas/altas foram processadas e tag 'Author' aplicada."
-                  echo "======================================================================="
-                  
-                  # ----------------------------------------------------------
-                  # Processamento de regras de gate
-                  # ----------------------------------------------------------
-                  echo "=================================================================="
-                  echo "Script finalizado."
-                  echo "=================================================================="
+                 # if [ "$http_code" == "200" ]; then
+                 #     echo "Tag 'Author' aplicada com sucesso na issue $issueId."
+                 # else
+                 #     echo "Falha ao aplicar tag na issue $issueId (HTTP $http_code)"
+                 #     echo "DEBUG: Resposta da API: $body"
+                 #     exit 1
+                 # fi
+                 # done
+                       
+                 echo ""
+                 echo "=================================================================="
+                 echo "Script finalizado."
+                 echo "=================================================================="
 
 
-                  # NECESSÁRIO ADICIONAR ESSE NO SCRIPT DA TELEFONICA - FIM
-                  
-                  echo ""
-                  echo "======================================================================="
-                  echo "Processamento das regras de gate para o projeto"
-                  echo "======================================================================="
-                  
-                  regras_json='[
-                    {
-                      "gate": "audited:false [fortify priority order]:critical [fortify priority order]:high",
-                      "name": "default",
-                      "bypass": "false"
-                    },
-                    {
-                      "gate": "audited:false [fortify priority order]:critical [fortify priority order]:high",
-                      "name": "teste",
-                      "bypass": "true"
-                    }
-                  ]'
-                  
-                  # Obtém regra default
-                  gate=$(echo "$regras_json" | jq --compact-output --raw-output '.[] | select(.name=="default") | .gate')
-                  bypass=$(echo "$regras_json" | jq --compact-output --raw-output '.[] | select(.name=="default") | .bypass')
-                  
-                  if [ -z "$gate" ]; then
-                      echo "Nenhuma regra 'default' definida para o projeto no Fortify."
-                      exit 1
-                  fi
-                  
-                  echo "→ Gate definido: $gate"
-                  echo "→ Bypass: $bypass"
-                  
-                  if [ "$bypass" == "true" ]; then
-                      echo "Bypass ativado: a regra 'default' não será aplicada."
-                      echo "Continuação do pipeline permitida."
-                  else
-                      echo "→ Aplicando regra 'default'..."
-                      filtro_aplicado="$gate"
-                      filtro_url_encoded=$(echo "$filtro_aplicado" | jq -sRr '@uri')
-                  
-                      echo "→ Consultando vulnerabilidades no Fortify SSC..."
-                      response=$(curl -sS -k -X GET --header 'Content-Type: application/json' \
-                          --header 'Accept: application/json' \
-                          --header "Authorization: FortifyToken $fortify_unified_login_token" \
-                          "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/issues?qm=issues&q=$filtro_url_encoded")
-                      exit_code=$?
-                      fortify_verificar_resposta_api
-                  
-                      num_issues=$(echo "$response" | jq '.count')
-                  
-                      if [ "$num_issues" -gt 0 ]; then
-                          echo "Gate falhou: $num_issues vulnerabilidades encontradas com base no filtro aplicado."
-                          echo "Verifique o relatório detalhado acima para mais informações."
-                          exit 1
-                      else
-                          echo "Gate aprovado: Nenhuma vulnerabilidade crítica ou alta encontrada."
-                          echo "Continuação do build autorizada."
-                      fi
-                  fi
+                 # NECESSÁRIO ADICIONAR ESSE NO SCRIPT DA TELEFONICA - FIM
+                 
+                 echo ""
+                 echo "======================================================================="
+                 echo "Processamento das regras de gate para o projeto"
+                 echo "======================================================================="
+                 
+                 regras_json='[
+                   {
+                     "gate": "audited:false [fortify priority order]:critical [fortify priority order]:high",
+                     "name": "default",
+                     "bypass": "false"
+                   },
+                   {
+                     "gate": "audited:false [fortify priority order]:critical [fortify priority order]:high",
+                     "name": "teste",
+                     "bypass": "true"
+                   }
+                 ]'
+                 
+                 # Obtém regra default
+                 gate=$(echo "$regras_json" | jq --compact-output --raw-output '.[] | select(.name=="default") | .gate')
+                 bypass=$(echo "$regras_json" | jq --compact-output --raw-output '.[] | select(.name=="default") | .bypass')
+                 
+                 if [ -z "$gate" ]; then
+                     echo "Nenhuma regra 'default' definida para o projeto no Fortify."
+                     exit 1
+                 fi
+                 
+                 echo "→ Gate definido: $gate"
+                 echo "→ Bypass: $bypass"
+                 
+                 if [ "$bypass" == "true" ]; then
+                     echo "Bypass ativado: a regra 'default' não será aplicada."
+                     echo "Continuação do pipeline permitida."
+                 else
+                     echo "→ Aplicando regra 'default'..."
+                     filtro_aplicado="$gate"
+                     filtro_url_encoded=$(echo "$filtro_aplicado" | jq -sRr '@uri')
+                 
+                     echo "→ Consultando vulnerabilidades no Fortify SSC..."
+                     response=$(curl -sS -k -X GET --header 'Content-Type: application/json' \
+                         --header 'Accept: application/json' \
+                         --header "Authorization: FortifyToken $fortify_unified_login_token" \
+                         "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/issues?qm=issues&q=$filtro_url_encoded")
+                     exit_code=$?
+                     fortify_verificar_resposta_api
+                 
+                     num_issues=$(echo "$response" | jq '.count')
+                 
+                     if [ "$num_issues" -gt 0 ]; then
+                         echo "Gate falhou: $num_issues vulnerabilidades encontradas com base no filtro aplicado."
+                         echo "Verifique o relatório detalhado acima para mais informações."
+                         exit 1
+                     else
+                         echo "Gate aprovado: Nenhuma vulnerabilidade crítica ou alta encontrada."
+                         echo "Continuação do build autorizada."
+                     fi
+                 fi

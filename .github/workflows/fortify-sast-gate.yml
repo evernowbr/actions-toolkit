@@ -27,8 +27,6 @@ on:
                 required: true
             FORTIFY_CONTROLLER_TOKEN:
                 required: true
-            FORTIFY_SSC_UPLOAD_TOKEN:
-                required: true
 
 jobs:
     scan:
@@ -50,7 +48,6 @@ jobs:
                   fortify_unified_login_token: ${{ secrets.FORTIFY_UNIFIED_LOGIN_TOKEN }}
                   fortify_controller_url: ${{ secrets.FORTIFY_CONTROLLER_URL }}
                   fortify_controller_token: ${{ secrets.FORTIFY_CONTROLLER_TOKEN }}
-                  fortify_ssc_upload_token: ${{ secrets.FORTIFY_SSC_UPLOAD_TOKEN }}
               run: |
                   echo "Executando Fortify SAST"
                   export PATH="$PATH:/opt/Fortify_ScanCentral_Client_25.2.0_x64/bin"
@@ -158,7 +155,7 @@ jobs:
                   fortify_regras_processamento
                   
                   echo "🔧 Executando Scancentral Client"
-                  output=$($fortify_scancentral_tool -ssctoken $fortify_controller_token -url $fortify_controller_url start -sargs "-Xmx2G" -skipBuild -block --log-file fortify.log --overwrite -application $fortify_project_name -version $fortify_version_name --upload-to-ssc --ssc-upload-token $fortify_ssc_upload_token 2>&1 | tee /dev/stderr )                    
+                  output=$($fortify_scancentral_tool -ssctoken $fortify_controller_token -url $fortify_controller_url start -sargs "-Xmx2G" -skipBuild -block --log-file fortify.log --overwrite -application $fortify_project_name -version $fortify_version_name --upload-to-ssc --ssc-upload-token $fortify_controller_token 2>&1 | tee /dev/stderr )                    
                   
                   # Verifica o código de resposta
                   exit_code=$?

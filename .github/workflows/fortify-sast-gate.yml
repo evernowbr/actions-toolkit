@@ -1,0 +1,376 @@
+name: Fortify SAST
+
+on:
+    workflow_call:
+        inputs:
+            name:
+                required: true
+                type: string
+            version:
+                required: true
+                type: string
+            fortify_scancentral_tool:
+                required: true
+                type: string
+            fortify_translate_name:
+                required: true
+                type: string
+            fortify_translate_additional_flags:
+                required: true
+                type: string
+        secrets:
+            FORTIFY_SSC_API_URL:
+                required: true
+            FORTIFY_UNIFIED_LOGIN_TOKEN:
+                required: true
+            FORTIFY_CONTROLLER_URL:
+                required: true
+            FORTIFY_CONTROLLER_TOKEN:
+                required: true
+            FORTIFY_SSC_UPLOAD_TOKEN:
+                required: true
+
+jobs:
+    scan:
+        name: Fortify SAST
+        runs-on: self-hosted
+
+        steps:
+            - name: Checkout do repositório
+              uses: actions/checkout@v4
+                  
+            - name: Run Scan
+              env:
+                  fortify_project_name: ${{ inputs.name }}
+                  fortify_version_name: ${{ inputs.version }}
+                  fortify_translate_name: ${{ inputs.fortify_translate_name }}
+                  fortify_scancentral_tool: ${{ inputs.fortify_scancentral_tool }}
+                  fortify_translate_additional_flags: ${{ inputs.fortify_translate_additional_flags }}
+                  fortify_ssc_api_url: ${{ secrets.FORTIFY_SSC_API_URL }}
+                  fortify_unified_login_token: ${{ secrets.FORTIFY_UNIFIED_LOGIN_TOKEN }}
+                  fortify_controller_url: ${{ secrets.FORTIFY_CONTROLLER_URL }}
+                  fortify_controller_token: ${{ secrets.FORTIFY_CONTROLLER_TOKEN }}
+                  fortify_ssc_upload_token: ${{ secrets.FORTIFY_SSC_UPLOAD_TOKEN }}
+              run: |
+                  echo "Executando Fortify SAST"
+                  export PATH="$PATH:/opt/Fortify_ScanCentral_Client_25.2.0_x64/bin"
+
+                  fortify_verificar_resposta_api() {
+                      if [ "$exit_code" == "0" ] || [ "$exit_code" == "" ]; then
+                          responseCode=$(echo "$response" | jq '.responseCode')
+                          if [ "$responseCode" != "200" ] && [ "$responseCode" != "201" ]; then
+                              echo "❌ Código de retorno diferente de 200: API retornou código $responseCode"
+                              echo "❌ Resposta da API: $response"
+                              exit 1
+                          fi
+                      else
+                          echo "❌ Comando retornou $exit_code"
+                          echo "❌ Mensagem de erro: $response"  
+                          exit $exit_code
+                      fi
+                  }
+
+                  fortify_verificar_codigo_de_resposta() {
+                  	if [ "$exit_code" != "0" ]; then
+                  		echo "❌ Comando retornou $exit_code"
+                  		exit $exit_code
+                  	fi
+                  }
+
+                  fortify_criar_projeto_e_versao() {
+                      # Cria um projeto e uma versão novos
+                      fortify_project_parameters='{"project":{"name":"'$fortify_project_name'"},"issueTemplateId":"Prioritized-HighRisk-Project-Template","name":"'$fortify_version_name'","customTagValuesAutoApply":true,"autoPredict":true,"predictionPolicy":"LAB Fortify Policy"}'
+                      response=$(curl -sS -k -X POST --header "Content-Type: application/json" --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/projectVersions" -d "$fortify_project_parameters")
+                      exit_code=$?
+                      fortify_verificar_resposta_api
+                      fortify_project_id=$(echo "$response" | jq '.data.project.id')
+                      fortify_project_version_id=$(echo "$response" | jq '.data.id')
+                      echo "✅ Projeto $fortify_project_name criado com ID $fortify_project_id."
+                      echo "✅ Versão $fortify_version_name criada com ID $fortify_project_version_id."
+                  }
+
+                  fortify_criar_versao() {
+                      # Cria uma versão para um projeto já existente
+                      fortify_project_parameters='{"project":{"name":"'$fortify_project_name'","id":"'$fortify_project_id'"},"issueTemplateId":"Prioritized-HighRisk-Project-Template","name": "'$fortify_version_name'"}'
+                      response=$(curl -sS -k -X POST --header "Content-Type: application/json" --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/projectVersions" -d "$fortify_project_parameters")
+                      exit_code=$?
+                      fortify_verificar_resposta_api
+                      fortify_project_version_id=$(echo "$response" | jq '.data.id')
+                      echo "✅ Versão $fortify_version_name criada com ID $fortify_project_version_id."
+                  }
+
+                  fortify_configurar_projeto() {
+                  # Configurar parâmetros adicionais do projeto
+                  fortify_parametros='{"requests":[{"uri":"'$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/attributes'","httpVerb":"PUT","postData":[{"values":[{"guid":"New"}],"attributeDefinitionId":5},{"values":[{"guid":"Internal"}],"attributeDefinitionId":6},{"values":[{"guid":"internalnetwork"}],"attributeDefinitionId":7}]},{"uri":"'$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/authEntities'","httpVerb":"PUT","postData":[]},{"uri":"'$fortify_ssc_api_url/projectVersions/$fortify_project_version_id?hideProgress=true'","httpVerb":"PUT","postData":{"committed":true}}]}'
+                  response=$(curl -sS -k -X POST --header "Content-Type: application/json" --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/bulk" -d "$fortify_parametros")
+                  exit_code=$?
+                  fortify_verificar_resposta_api
+                  successCount=$(echo "$response" | jq '.successCount')
+                  if [ "$successCount" != "3" ]; then
+                      echo "❌ Parâmetros adicionais do projeto $fortify_project_name configurados sem sucesso."
+                      echo "❌ Código de retorno diferente de 200: API retornou código $exit_code"
+                      echo "❌ Resposta da API: $response"
+                      exit 1
+                  else
+                      echo "✅ Parâmetros adicionais do projeto $fortify_project_name configurados com sucesso."
+                  fi
+                  }
+
+                  fortify_regras_processamento() {
+                  # Definir regras de processamento de resultados
+                  response=$(curl -sS -k -X PUT --header "Content-Type: application/json" --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/resultProcessingRules" -d '[{"identifier": "com.fortify.manager.BLL.processingrules.BuildProjectProcessingRule","displayName": "Require approval if the Build Project is different between scans","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.FileCountProcessingRule","displayName": "Require approval if file count differs by more than 10%","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.LOCCountProcessingRule","displayName": "Require approval if line count differs by more than 10%","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.NewerEngineVersionProcessingRule","displayName": "Require approval if the engine version of a scan is newer than the engine version of the previous scan","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.RulePackVersionProcessingRule","displayName": "Require approval if the rulepacks used in the scan do not match the rulepacks used in the previous scan","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.WarningProcessingRule","displayName": "Require approval if result has analysis warnings","displayable": true,"enabled": false},{"identifier": "com.fortify.manager.BLL.processingrules.ExternalListVersionProcessingRule","displayName": "Check external metadata file versions in scan against versions on server.","displayable": true,"enabled": false}]')
+                  exit_code=$?
+                  fortify_verificar_resposta_api
+                  echo "✅ Regras de processamento do projeto $fortify_project_name configuradas com sucesso."
+                  }
+                  
+                  # ========== EXECUÇÃO PRINCIPAL ==========
+                  
+                  echo '   ____            __   _  ___        ____ ___    ____ ______ '
+                  echo '  / __/___   ____ / /_ (_)/ _/__ __  / __// _ |  / __//_  __/ '
+                  echo ' / _/ / _ \ / __// __// // _// // / _\ \ / __ | _\ \   / /    ' 
+                  echo '/_/   \___//_/   \__//_//_/  \_, / /___//_/ |_|/___/  /_/     '
+                  echo '                            /___/                             '
+                  
+                  # Verificar se projeto e versão já existem
+                  echo "🔍 Verificando se o projeto $fortify_project_name existe no SSC..."
+                  response=$(curl -sS -k -X GET --header "Accept: application/json" --header "Authorization: FortifyToken $fortify_unified_login_token" "$fortify_ssc_api_url/projectVersions?q=$fortify_project_name&fulltextsearch=true")
+                  exit_code=$?
+                  fortify_verificar_resposta_api
+                  fortify_project_id=$(echo "$response" | jq '.data[] | select(.project.name=="'$fortify_project_name'") | .project.id' | head -1 | awk '{$1=$1};1')
+                  fortify_project_version_id=$(echo "$response" | jq '.data[] | select(.project.name=="'$fortify_project_name'") | select(.name=="'$fortify_version_name'") | .id' | awk '{$1=$1};1')
+                  
+                  if [ "$fortify_project_version_id" != "" ]; then
+                      # Já existe projeto e versão no SSC
+                      echo "✅ O projeto $fortify_project_name já existe no SSC com ID $fortify_project_id."
+                      echo "✅ A versão $fortify_version_name já existe no SSC com ID $fortify_project_version_id."
+                  elif [ "$fortify_project_id" != "" ]; then
+                      # Já existe projeto (sem versão) no SSC
+                      echo "✅ O projeto $fortify_project_name já existe no SSC com ID $fortify_project_id. Criando versão..."
+                      fortify_criar_versao
+                  else
+                      # Não tem projeto nem versão no SSC
+                      echo "⚠️  O projeto $fortify_project_name ainda não existe no SSC. Criando projeto e versão..."
+                      fortify_criar_projeto_e_versao
+                  fi
+                  
+                  fortify_configurar_projeto
+                  fortify_regras_processamento
+                  
+                  echo "🔧 Executando Scancentral Client"
+                  output=$($fortify_scancentral_tool -ssctoken $fortify_controller_token -url $fortify_controller_url start -sargs "-Xmx2G" -skipBuild -block --log-file fortify.log --overwrite -application $fortify_project_name -version $fortify_version_name --upload-to-ssc --ssc-upload-token $fortify_ssc_upload_token 2>&1 | tee /dev/stderr )                    
+                  
+                  # Verifica o código de resposta
+                  exit_code=$?
+                  fortify_verificar_codigo_de_resposta
+                    
+                    # Extrai o job token da saída usando grep e regex
+                    fortify_job_token=$(echo "$output" | grep "Submitted job and received token" | grep -E -o "[a-f0-9-]{36}")
+                    
+                    # Verifica se o job token foi encontrado
+                    if [ -z "$fortify_job_token" ]; then
+                        echo "❌ Job token não foi criado."
+                        exit 1
+                    else
+                        echo "✅ Arquivos para scan enviados com sucesso. ID do Scan: $fortify_job_token"
+                    fi
+
+                    echo "🏷️  Iniciando git blame e set tag author"
+                    # ==========================
+                    # Verifica se a tag Author existe
+                    # ==========================
+                    echo "🔍 Verificando custom tags no Fortify..."
+
+                    response=$(curl -s -w "%{http_code}" -H "Authorization: FortifyToken $fortify_unified_login_token" \
+                    "$fortify_ssc_api_url/customTags?start=0&limit=100&q=hidden%3Afalse")
+
+                    code="${response: -3}"
+                    body="${response::-3}"
+
+                    [ "$code" != "200" ] && echo "❌ Erro HTTP $code" && exit 1
+                    echo "$body" | jq empty >/dev/null 2>&1 || { echo "❌ JSON inválido"; exit 1; }
+
+                    guid=$(echo "$body" | jq -r '.data[] | select(.name=="Author" and .customTagType=="CUSTOM") | .guid')
+                    if [ -z "$guid" ]; then
+                        echo "⚠️  Tag 'Author' com tipo 'CUSTOM' não encontrada."
+                        exit 1
+                    fi
+                    echo "✅ Tag 'Author' encontrada! GUID: $guid"
+
+                    # ==========================
+                    # Verifica se a tag Author já está aplicada ao projeto
+                    # ==========================
+                    echo "🔍 Verificando se a tag Author está aplicada ao projeto..."
+
+                    response=$(curl -s -w "%{http_code}" -H "Authorization: FortifyToken $fortify_unified_login_token" \
+                    "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/customTags?start=0&limit=100")
+
+                    code="${response: -3}"
+                    body="${response::-3}"
+
+                    [ "$code" != "200" ] && echo "❌ Erro HTTP $code" && exit 1
+                    echo "$body" | jq empty >/dev/null 2>&1 || { echo "❌ JSON inválido"; exit 1; }
+
+                    echo "📋 Tags atualmente aplicadas ao projeto:"
+                    echo "$body" | jq -r '.data[] | "GUID: \(.guid)  Nome: \(.name // "N/A")  Tipo: \(.customTagType // "N/A")"'
+
+                    aplicada=$(echo "$body" | jq -r --arg guid "$guid" '.data[] | select(.guid==$guid) | .guid')
+                    if [ -n "$aplicada" ]; then
+                        echo "✅ A tag Author já está habilitada no projeto."
+                    else
+                        echo "⚙️  A tag Author ainda não está habilitada. Aplicando..."
+                        payload=$(echo "$body" | jq -r '.data[].guid' | jq -R . | jq -s 'map({guid:.})' | jq --arg guid "$guid" '. + [{"guid":$guid}]')
+                        curl -s -X PUT -H "Authorization: FortifyToken $fortify_unified_login_token" \
+                            -H "Content-Type: application/json" -d "$payload" \
+                            "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/customTags"
+                        echo "✅ Tag Author aplicada com sucesso!"
+                    fi
+
+                    # ==========================
+                    # Baixa issues do Fortify
+                    # ==========================
+                    responseIssues=$(curl -s -g \
+                        -X GET "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/issues?orderby=id" \
+                        -H "Accept: application/json" -H "Content-Type: application/json" \
+                        -H "Authorization: FortifyToken $fortify_unified_login_token")
+
+                    VULN_FILE="./fortify_vulnerabilities.json"
+                    echo "$responseIssues" > "$VULN_FILE"
+
+                    # ==========================
+                    # Processa cada vulnerabilidade crítica/alta e aplica tag Author
+                    # ==========================
+                    jq -c '.data[] | select((.enginePriority=="Critical" or .enginePriority=="High") and (.issueStatus=="Unreviewed" or .primaryTag=="Exploitable"))' "$VULN_FILE" |
+                    while read -r issue; do
+                        issueId=$(echo "$issue" | jq -r '.id')
+                        filePath=$(echo "$issue" | jq -r '.fullFileName')
+                        lineNumber=$(echo "$issue" | jq -r '.lineNumber')
+                        fixedPath="${filePath#./}"
+                        authorMail="N/A"
+                        if [ -f "$fixedPath" ] && [ "$lineNumber" != "null" ] && [ "$lineNumber" -gt 0 ]; then
+                            blameOutput=$(git blame -L "$lineNumber,$lineNumber" --porcelain "$fixedPath" 2>/dev/null)
+                            foundMail=$(echo "$blameOutput" | grep '^author-mail' | head -n 1 | cut -d' ' -f2 | sed 's/[<>]//g')
+                            [ -n "$foundMail" ] && authorMail="$foundMail"
+                        fi
+                        echo "📝 Issue ID: $issueId  Arquivo: $filePath  Linha: $lineNumber  Autor: $authorMail"
+
+                        payloadAuthor=$(jq -n --arg id "$issueId" --arg rev "$(echo "$issue" | jq -r '.revision')" \
+                            --arg guid "$guid" --arg email "$authorMail" \
+                            '{
+                                type: "AUDIT_ISSUE",
+                                values: {
+                                    issues: [{id: ($id|tonumber), revision: ($rev|tonumber)}],
+                                    customTagAudit: [{customTagGuid: $guid, textValue: $email}],
+                                    comment: "",
+                                    hasTagComment: false
+                                }
+                            }')
+
+                        curl -s -X POST \
+                            -H "Content-Type: application/json" \
+                            -H "Authorization: FortifyToken $fortify_unified_login_token" \
+                            -d "$payloadAuthor" \
+                            "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/issues/action?silent=true"
+                    done
+
+                    echo "✅ Processo concluído: todas as vulnerabilidades críticas/altas foram marcadas com o Author."
+
+                    
+                    echo "⚙️  Iniciando processamento das regras de gate para o projeto."
+                    
+                    regras_json='[
+                      {
+                        "gate": "audited:false [fortify priority order]:critical [fortify priority order]:high",
+                        "name": "default",
+                        "bypass": "false",
+                        "useIssuesDate": "false",
+                        "issuesDate": ""
+                      },
+                      {
+                        "gate": "audited:false [fortify priority order]:critical [fortify priority order]:high",
+                        "name": "dvop-template-android-app-unico",
+                        "bypass": "false",
+                        "useIssuesDate": "true",
+                        "issuesDate": "2025-10-01"
+                      }
+                    ]'
+                    
+                    # ✨ NOVO: Busca regra específica do projeto ou usa default
+                    project_name="$fortify_project_name"
+                    regra_especifica=$(echo "$regras_json" | jq --compact-output --raw-output ".[] | select(.name==\"$project_name\")")
+                    
+                    if [ -z "$regra_especifica" ]; then
+                        echo "⚙️  Usando regra 'default' para o projeto $project_name"
+                        gate=$(echo "$regras_json" | jq --compact-output --raw-output '.[] | select(.name=="default") | .gate')
+                        bypass=$(echo "$regras_json" | jq --compact-output --raw-output '.[] | select(.name=="default") | .bypass')
+                        use_issues_date=$(echo "$regras_json" | jq --compact-output --raw-output '.[] | select(.name=="default") | .useIssuesDate')
+                        issues_date=$(echo "$regras_json" | jq --compact-output --raw-output '.[] | select(.name=="default") | .issuesDate')
+                    else
+                        echo "⚙️  Usando regra específica para o projeto $project_name"
+                        gate=$(echo "$regra_especifica" | jq --compact-output --raw-output '.gate')
+                        bypass=$(echo "$regra_especifica" | jq --compact-output --raw-output '.bypass')
+                        use_issues_date=$(echo "$regra_especifica" | jq --compact-output --raw-output '.useIssuesDate')
+                        issues_date=$(echo "$regra_especifica" | jq --compact-output --raw-output '.issuesDate')
+                    fi
+                    
+                    echo "📋 Configuração aplicada:"
+                    echo "   - Gate: $gate"
+                    echo "   - Bypass: $bypass"
+                    echo "   - Filtro por data: $use_issues_date"
+                    [ ! -z "$issues_date" ] && echo "   - Data de corte: $issues_date"
+                    
+                    # Verifica se a regra será aplicada ou ignorada (bypass)
+                    if [ "$bypass" == "true" ]; then
+                        echo "⚠️  Bypass ativado: a regra não será aplicada."
+                        echo "✅ Continuação do pipeline permitida."
+                    else
+                        echo "🔒 Bypass desativado: aplicando regra de gate."
+                        
+                        # Monta o filtro base
+                        filtro_aplicado="$gate"
+                        
+                        # ✨ NOVO: Adiciona filtro de data se configurado
+                        if [ "$use_issues_date" == "true" ] && [ ! -z "$issues_date" ]; then
+                            echo "📅 Filtrando issues encontradas APÓS $issues_date"
+                            filtro_aplicado="$filtro_aplicado foundDate:[$issues_date,*]"
+                        fi
+                        
+                        echo "🔍 Filtro completo aplicado: \`$filtro_aplicado\`"
+                        filtro_url_encoded=$(echo "$filtro_aplicado" | jq -sRr '@uri')
+                        echo "📡 Consultando vulnerabilidades no Fortify SSC..."
+                    
+                        response=$(curl -sS -k -X GET --header 'Content-Type: application/json' \
+                            --header 'Accept: application/json' \
+                            --header "Authorization: FortifyToken $fortify_unified_login_token" \
+                            "$fortify_ssc_api_url/projectVersions/$fortify_project_version_id/issues?qm=issues&q=$filtro_url_encoded")
+                        exit_code=$?
+                    
+                        fortify_verificar_resposta_api
+                    
+                        num_issues=$(echo "$response" | jq '.count')
+                    
+                        if [ "$num_issues" -gt 0 ]; then
+                            if [ "$use_issues_date" == "true" ] && [ ! -z "$issues_date" ]; then
+                                echo "❌ Gate falhou: **$num_issues** vulnerabilidades NOVAS encontradas (após $issues_date)."
+                            else
+                                echo "❌ Gate falhou: **$num_issues** vulnerabilidades encontradas com base no filtro aplicado."
+                            fi
+                            echo "📄 Verifique o relatório detalhado no Fortify SSC."
+                            echo '  _____       __         ____       _  __ '
+                            echo ' / ___/___ _ / /_ ___   / __/___ _ (_)/ / '
+                            echo '/ (_ // _ `// __// -_) / _/ / _ `// // /  '
+                            echo '\___/ \_,_/ \__/ \__/ /_/   \_,_//_//_/   '
+                            exit 1
+                        else
+                            if [ "$use_issues_date" == "true" ] && [ ! -z "$issues_date" ]; then
+                                echo "✅ Gate aprovado: Nenhuma vulnerabilidade nova crítica/alta encontrada (após $issues_date)."
+                            else
+                                echo "✅ Gate aprovado: Nenhuma vulnerabilidade crítica ou alta encontrada."
+                            fi
+                            echo "🚀 Continuação do build autorizada."
+                            echo '  _____       __         ___                 '
+                            echo ' / ___/___ _ / /_ ___   / _ \ ___ _ ___  ___ '
+                            echo '/ (_ // _ `// __// -_) / ___// _ `/(_-< (_-< '
+                            echo '\___/ \_,_/ \__/ \__/ /_/    \_,_//___//___/ '
+                        fi
+                    fi
